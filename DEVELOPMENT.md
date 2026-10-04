@@ -50,3 +50,15 @@ The callback was published to GitHub Pages in commit `5f4ab76` and passed both l
 - The existing refresh grant still worked after the negative checks. No Drive file requests were made.
 
 The connection panel exposes the two PKCE checks for development. Each opens a fresh browser sign-in, saves no token from a rejected exchange, and labels generic errors inconclusive. If Google unexpectedly issues a token, the probe attempts revocation and clears the local grant. Do not run these checks on a production connection.
+
+## iPhone installation through BRAT
+
+The public GitHub prerelease `0.1.0` contains `main.js`, `manifest.json`, and `styles.css` as individual release assets. It includes no Google credentials or local vault settings.
+
+1. Update Obsidian on iPhone and create an empty local vault named **Drive Sync Test**, with **Store in iCloud** off.
+2. In that vault, open **Settings → Community plugins**, allow community plugins, then **Browse** and install/enable **BRAT**.
+3. Open BRAT settings, choose **Add beta plugin**, and enter `https://github.com/patrickp2/obsidian-drive-sync`.
+4. Select the specific version `0.1.0` for the first controlled test and enable the plugin after installation. No GitHub personal access token is needed for this public repository under normal rate limits.
+5. Configure Google credentials separately through the phone's encrypted Obsidian Keychain. Do not transfer the Mac's plugin settings, refresh token, or full vault. Mobile storage availability and the browser handoff still need validation.
+
+BRAT handles the plugin folder and downloaded files. iPhone Mirroring is optional for controlling the phone; it is not the installation mechanism. See [BRAT's developer guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md) for how releases are selected.
