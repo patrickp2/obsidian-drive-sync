@@ -1,0 +1,27 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+main.js
+*.map
+*.tsbuildinfo
+
+# Local credentials and runtime configuration
+.env
+.env.*
+!.env.example
+data.json
+credentials*.json
+client_secret*.json
+token*.json
+secrets/
+*.pem
+*.key
+
+# Real vaults, sync state, and developer test data
+.obsidian/
+vaults/
+test-vaults/
+local-state/
+*.log
+.DS_Store
