@@ -65,7 +65,7 @@ External projects left in Testing commonly issue seven-day Drive refresh grants.
 8. Continue through the Google step in the same panel. Sign into the same Google account and return to Obsidian. Devices already signed in skip this step. Choose **Done** at Setup complete.
 9. Wait for **Synced with Drive**. Create a synthetic note on desktop, verify it arrives on the phone, edit it on the phone, and verify the edit returns to desktop before using any important data.
 
-Encrypted pairing, configuration storage, and initial sync passed on the real iPhone with the external Camera handoff in 0.2.0. The new 0.2.1 in-app scanner still needs physical-camera validation. Its invitation contains a temporary pairing key, not Google credentials. Keep the QR/link private. Configuration is encrypted before crossing the local network; the listener expires after three minutes or when the desktop panel closes. Access/refresh tokens are never transferred. Closing the panel before completion cancels pairing.
+Encrypted pairing, configuration storage, and initial sync passed on the real iPhone with the external Camera handoff in 0.2.0. The 0.2.1 in-app live camera scan and step flow also passed on the real iPhone; after completion its connection and Synced with Drive status were verified. Its invitation contains a temporary pairing key, not Google credentials. Keep the QR/link private. Configuration is encrypted before crossing the local network; the listener expires after three minutes or when the desktop panel closes. Access/refresh tokens are never transferred. Closing the panel before completion cancels pairing.
 
 ## Everyday use
 

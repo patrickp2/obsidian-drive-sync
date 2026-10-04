@@ -15,6 +15,7 @@ See [INSTALLATION.md](INSTALLATION.md) for the current desktop/phone setup. Runt
 
 - Authentication: state expiry/replay, PKCE, scope validation, refresh retention, retries, revocation, and unload/disconnect races.
 - Callback: fixed protocol handler, safe rendering, history cleanup, no third-party resources, exact CSP hash.
+- iPhone file API: v2 current-ETag writes passed; stale writes returned HTTP 412 and preserved newer bytes; fresh retry passed. Probe resources were moved to Drive trash.
 - Pairing: authenticated encrypted transfer, wrong-key/session rejection, reflection/replay rejection, private endpoint validation, and configuration-only import.
 - Drive adapter: mandatory ETag conditions, v2 upload path, moved-file rejection, consistent downloads, and full/duplicate-free pagination.
 - Sync engine: independent device stores, common baselines, conflicts, stale uploads, local edits during downloads, interrupted creates, restart recovery, missing files, and failed listings.
@@ -28,7 +29,8 @@ The desktop vault is `test-vaults/drive-sync-auth` (ignored by Git), running Obs
 - Desktop: browser sign-in, vault-specific handoff, direct refresh, plugin/vault reload recovery, and separate wrong/missing PKCE rejection passed.
 - iPhone: external Chrome launch, user-completed OAuth return, direct refresh, and automatic refresh after app-switcher force-close/relaunch passed.
 - Drive: v3 media PATCH ignored the deliberately nonmatching precondition; v2 media PUT rejected the stale ETag with 412 and preserved content. Current ETags succeeded. Probe resources were moved to trash.
-- Pairing: a temporary listener bound to the Mac's private network interface successfully transferred synthetic configuration through the actual encrypted request/response path. Real-iPhone external-Camera handoff, desktop approval, configuration storage, and first sync passed. In-app camera scanning added in 0.2.1 remains to validate on physical camera hardware.
+- iPhone file API: v2 current-ETag writes passed; stale writes returned HTTP 412 and preserved newer bytes; fresh retry passed. Probe resources were moved to Drive trash.
+- Pairing: a temporary listener bound to the Mac's private network interface successfully transferred synthetic configuration through the actual encrypted request/response path. Real-iPhone external-Camera handoff, desktop approval, configuration storage, and first sync passed. In-app camera permission, live scanning, and the single-panel flow passed on the real iPhone in 0.2.1, with user confirmation of scanning and subsequent UI verification of connection and sync status.
 - Desktop sync: the current engine created the dedicated Drive folder, uploaded the synthetic README and Sync test notes, and recorded confirmed baselines. Further mobile and conflict results must be recorded after they run.
 
 - Real-device edits: Mac → iPhone → Mac → iPhone passed. Pausing phone sync, independently editing both devices, and resuming preserved both branches as ordinary Markdown; the conflict copy propagated to the Mac.
