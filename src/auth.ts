@@ -8,9 +8,9 @@ export interface SecretStore {
 }
 export interface HttpResponse { status: number; json: unknown }
 export type Transport = (url: string, body: URLSearchParams) => Promise<HttpResponse>;
-export type AuthStatus = 'disconnected' | 'awaiting-browser' | 'connecting' | 'connected' | 'refreshing' | 'retrying' | 'needs-reconnect';
+export type AuthStatus = 'disconnected' | 'awaiting-browser' | 'connecting' | 'connected' | 'refreshing' | 'retrying' | 'test-complete' | 'needs-reconnect';
 export interface AuthState { status: AuthStatus; message: string }
-interface PendingLogin { state: string; verifier: string; createdAt: number; client: ClientConfig }
+interface PendingLogin { state: string; verifier: string; createdAt: number; client: ClientConfig; verifyPkce?: 'wrong' | 'missing' }
 interface Grant { clientId: string; refreshToken: string; scope: string }
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -76,7 +76,7 @@ export class AuthSession {
       if (this.state.status !== 'retrying') this.publish('needs-reconnect', 'Could not restore Google access. Check your connection settings.');
     }
   }
-  async begin(): Promise<string> {
+  async begin(verifyPkce?: 'wrong' | 'missing'): Promise<string> {
     if (this.stopped || this.exchangeInFlight || this.refreshInFlight) throw new Error('Wait for the current connection request to finish.');
     const client = this.client();
     const generation = ++this.generation;
@@ -86,7 +86,7 @@ export class AuthSession {
     const verifier = randomValue();
     const challenge = await pkceChallenge(verifier);
     if (this.stopped || generation !== this.generation) throw new Error('Sign-in was cancelled.');
-    this.pending = { state, verifier, createdAt: this.now(), client };
+    this.pending = { state, verifier, createdAt: this.now(), client, verifyPkce };
     const params = new URLSearchParams({ client_id: client.clientId, redirect_uri: CALLBACK_URL,
       response_type: 'code', scope: DRIVE_SCOPE, state, code_challenge: challenge,
       code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent' });
@@ -120,17 +120,47 @@ export class AuthSession {
     const generation = this.generation;
     this.exchangeInFlight = true;
     this.publish('connecting', 'Checking your Google connection. Sync is disabled.');
+    let pkceStage = 'starting checks';
     try {
-      const result = await this.transport(TOKEN_URL, new URLSearchParams({
+      const exchangeBody = new URLSearchParams({
         client_id: current.clientId, client_secret: current.clientSecret, code: response.code!,
         code_verifier: pending.verifier, grant_type: 'authorization_code', redirect_uri: CALLBACK_URL
-      }));
+      });
+      if (pending.verifyPkce) {
+        const mode = pending.verifyPkce;
+        pkceStage = `${mode} verifier rejection`;
+        const probe = new URLSearchParams(exchangeBody);
+        if (mode === 'wrong') probe.set('code_verifier', randomValue());
+        else probe.delete('code_verifier');
+        const rejected = await this.transport(TOKEN_URL, probe);
+        if (this.stopped || generation !== this.generation) return;
+        if (rejected.status === 200) {
+          pkceStage = `unexpected token issued for ${mode} verifier`;
+          const token = requiredString(object(rejected.json).access_token);
+          await this.transport(REVOKE_URL, new URLSearchParams({ token }));
+          this.secrets.clear(this.key);
+          this.accessToken = null;
+          throw new Error('PKCE probe unexpectedly succeeded.');
+        }
+        const rejection = object(rejected.json);
+        // Only report a passed test for a verifier-specific rejection. A generic
+        // invalid/used code, network failure, or client error is inconclusive.
+        if (rejected.status !== 400 || !['invalid_grant', 'invalid_request'].includes(String(rejection.error)) ||
+            typeof rejection.error_description !== 'string' || !/verifier|code.challenge|pkce/i.test(rejection.error_description)) {
+          throw new Error('PKCE rejection could not be established.');
+        }
+        this.publish('test-complete', `Google rejected the ${mode} PKCE verifier. Test passed; no new token saved. Sync is disabled.`);
+        return;
+      }
+      pkceStage = 'correct verifier exchange';
+      const result = await this.transport(TOKEN_URL, exchangeBody);
       if (this.stopped || generation !== this.generation) return;
       // Never carry a previous account's refresh grant into a new login.
       this.accept(result, current.clientId);
     } catch {
-      if (!this.stopped && generation === this.generation) this.publish('needs-reconnect', 'Could not complete sign-in. Start again.');
-      throw new Error('Could not complete sign-in. Start again.');
+      const message = pending.verifyPkce ? `PKCE verification failed or was inconclusive at: ${pkceStage}. Sync remains disabled. Reconnect before further testing.` : 'Could not complete sign-in. Start again.';
+      if (!this.stopped && generation === this.generation) this.publish('needs-reconnect', message);
+      throw new Error(message);
     } finally { this.exchangeInFlight = false; }
   }
   private accept(response: HttpResponse, clientId: string, previous?: Grant): void {

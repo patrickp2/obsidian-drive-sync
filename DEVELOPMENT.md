@@ -35,6 +35,18 @@ The Pages callback must be published before a real login test. Preparing it loca
 
 ## Current local setup
 
-On 2026-10-04, dedicated Google Cloud project `obsidian-drive-sync-510621` was created under `patrickpeters.org` (the account cannot create projects outside an organization). Billing is unlinked, the Drive API is enabled, and Google Auth Platform uses an Internal audience. The experimental web OAuth client has been created with the exact callback URL. Secure device configuration and live authentication remain pending.
+On 2026-10-04, dedicated Google Cloud project `obsidian-drive-sync-510621` was created under `patrickpeters.org` (the account cannot create projects outside an organization). Billing is unlinked, the Drive API is enabled, and Google Auth Platform uses an Internal audience. The experimental web OAuth client has been created with the exact callback URL. The disposable desktop vault is configured through encrypted Obsidian Keychain; live sign-in and refresh succeeded.
 
-The callback was published to GitHub Pages in commit `5f4ab76` and passed both local and deployed browser smoke checks using synthetic parameters: it showed the fixed Obsidian return link, immediately cleared its query string, and displayed the normal start page on reload. No real authorization code was used. The disposable local vault is `test-vaults/drive-sync-auth` (ignored by Git); compiled plugin files are copied there and the vault was opened in Obsidian 1.13.7 in Restricted Mode. The plugin has not yet been enabled.
+The callback was published to GitHub Pages in commit `5f4ab76` and passed both local and deployed browser smoke checks using synthetic parameters: it showed the fixed Obsidian return link, immediately cleared its query string, and displayed the normal start page on reload. Those smoke checks used no real authorization code. Subsequent live Google tests also succeeded. The disposable local vault is `test-vaults/drive-sync-auth` (ignored by Git); the compiled plugin is enabled there in Obsidian 1.13.7. Existing user vaults were not modified.
+
+### Desktop live results (2026-10-04)
+
+- The browser granted only `drive.file`; normal code exchange and direct refresh succeeded.
+- SecretStorage reported encryption available. Plugin settings contained only the four expected non-secret configuration fields after sign-in.
+- Refresh succeeded after plugin unload/reload and after a full reload of the test vault's renderer. A complete application quit/relaunch and real iPhone persistence are still separate checks.
+- A callback without a vault target went to another open vault. The fixed callback binds the runtime vault ID into the random state and supplies `vault` to Obsidian. The repeated browser handoff then reached the correct vault. This runtime ID property is undocumented; if unavailable, the manual fallback remains.
+- Reusing a consumed callback was rejected. This is expected and does not mean an existing connection is lost.
+- Google rejected both a wrong verifier and a missing verifier with verifier-specific errors, each using a separate fresh code. The earlier sequence that attempted negative checks followed by a positive exchange on the same code was inconclusive; do not reuse that test sequence. Normal positive exchanges were verified separately.
+- The existing refresh grant still worked after the negative checks. No Drive file requests were made.
+
+The connection panel exposes the two PKCE checks for development. Each opens a fresh browser sign-in, saves no token from a rejected exchange, and labels generic errors inconclusive. If Google unexpectedly issues a token, the probe attempts revocation and clears the local grant. Do not run these checks on a production connection.

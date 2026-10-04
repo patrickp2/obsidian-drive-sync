@@ -4,7 +4,7 @@ An Obsidian plugin project for automatically syncing local Mac and iPhone/iPad v
 
 The Mac vault will live outside folders managed by Google Drive for desktop or other sync services. After setup, routine synchronization should happen automatically while the vault is open and the device allows execution, with visible pending work and preserved conflicts.
 
-**Status: authentication-only prototype implemented; static callback deployed. Google client compatibility and the real iPhone flow remain unverified. Vault synchronization is disabled. Do not use with a live vault.**
+**Status: authentication-only prototype implemented; static callback deployed. Desktop sign-in, PKCE rejection checks, refresh, and vault reload recovery are verified. The real iPhone flow and production client-type suitability remain unverified. Vault synchronization is disabled. Do not use with a live vault.**
 
 ## Project layout
 

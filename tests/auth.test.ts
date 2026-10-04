@@ -166,3 +166,33 @@ test('routing state retains a random nonce and rejects a changed vault ID', asyn
   assert.match(state, /^[A-Za-z0-9_-]{43}\.0123456789abcdef$/);
   await assert.rejects(session.complete({state: state.replace('0123456789abcdef','fedcba9876543210'), code: 'synthetic-code'}), /pending/);
 });
+
+test('PKCE probes use fresh codes and require verifier-specific rejection', async () => {
+  const f = fixture();
+  f.setHandler(async () => ({status: 400, json: {error: 'invalid_grant', error_description: 'Invalid code_verifier'}}));
+  for (const mode of ['wrong', 'missing'] as const) {
+    const state = new URL(await f.session.begin(mode)).searchParams.get('state')!;
+    await f.session.complete({state, code: `synthetic-${mode}-code`});
+    assert.equal(f.session.state.status, 'test-complete');
+  }
+  assert.equal(f.calls.length, 2);
+  assert.equal(f.calls[0]!.body.has('code_verifier'), true);
+  assert.equal(f.calls[1]!.body.has('code_verifier'), false);
+  assert.notEqual(f.calls[0]!.body.get('code'), f.calls[1]!.body.get('code'));
+  assert.equal(f.values.size, 0);
+});
+test('generic invalid-code errors do not pass a PKCE probe', async () => {
+  const f = fixture();
+  f.setHandler(async () => ({status: 400, json: {error: 'invalid_grant', error_description: 'Expired code'}}));
+  const state = new URL(await f.session.begin('missing')).searchParams.get('state')!;
+  await assert.rejects(f.session.complete({state, code: 'synthetic-code'}), /inconclusive/);
+  assert.equal(f.session.state.status, 'needs-reconnect');
+});
+test('PKCE probe never stores a token issued for an invalid verifier', async () => {
+  const f = fixture();
+  const state = new URL(await f.session.begin('wrong')).searchParams.get('state')!;
+  await assert.rejects(f.session.complete({state, code: 'synthetic-code'}), /PKCE verification/);
+  assert.equal(f.values.size, 0);
+  assert.ok(f.calls[1]!.url.endsWith('/revoke'));
+  assert.equal(f.session.state.status, 'needs-reconnect');
+});

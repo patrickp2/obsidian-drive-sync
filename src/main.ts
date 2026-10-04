@@ -86,9 +86,9 @@ export default class DriveSyncPlugin extends Plugin {
     }
     this.updateStatus();
   }
-  async connect(): Promise<void> {
+  async connect(verifyPkce?: 'wrong' | 'missing'): Promise<void> {
     if (!this.settings.prototypeAcknowledged) throw new Error('Open Drive Sync settings and acknowledge this authentication-only prototype first.');
-    window.open(await this.auth.begin(), '_blank');
+    window.open(await this.auth.begin(verifyPkce), '_blank');
   }
   showConnection(): void { new ConnectionModal(this.app, this).open(); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -112,6 +112,9 @@ class ConnectionModal extends Modal {
     this.contentEl.createEl('p', { text: 'Authentication test only. This build does not read, upload, change, or delete your notes.' });
     new Setting(this.contentEl).setName('Google connection').addButton(button => button.setButtonText('Connect').onClick(() => void this.plugin.run(() => this.plugin.connect())))
       .addButton(button => button.setButtonText('Test refresh').onClick(() => void this.plugin.run(() => this.plugin.auth.refresh())));
+    new Setting(this.contentEl).setName('Verify Google PKCE').setDesc('Development checks, each with a fresh sign-in code. No token is saved for these tests. An unexpected success triggers token revocation.')
+      .addButton(button => button.setButtonText('Test wrong verifier').onClick(() => void this.plugin.run(() => this.plugin.connect('wrong'))))
+      .addButton(button => button.setButtonText('Test missing verifier').onClick(() => void this.plugin.run(() => this.plugin.connect('missing'))));
     new Setting(this.contentEl).setName('Finish sign-in manually').setDesc('Use only if the browser could not return to Obsidian.')
       .addButton(button => button.setButtonText('Paste return link').onClick(() => new ReturnLinkModal(this.app, this.plugin).open()));
     new Setting(this.contentEl).setName('Disconnect and revoke access')
@@ -141,8 +144,11 @@ class ReturnLinkModal extends Modal {
 }
 
 class DriveSyncSettings extends PluginSettingTab {
+  private unsubscribe?: () => void;
+  hide(): void { this.unsubscribe?.(); this.unsubscribe = undefined; }
   constructor(app: App, private readonly plugin: DriveSyncPlugin) { super(app, plugin); }
   display(): void {
+    this.unsubscribe?.();
     const { containerEl } = this; containerEl.empty();
     containerEl.createEl('p', { text: 'Authentication prototype — synchronization is disabled. Use a disposable test vault. Google web-client compatibility and the real iPhone handoff still require validation.' });
     new Setting(containerEl).setName('Enable authentication testing').setDesc('Use only your own dedicated Google project with billing disabled. A web client secret on a device cannot be treated as confidential.')
@@ -164,8 +170,9 @@ class DriveSyncSettings extends PluginSettingTab {
     }
     new Setting(containerEl).setName('Authorized redirect URI').setDesc(CALLBACK_URL);
     new Setting(containerEl).setName('Requested Google permission').setDesc('drive.file: files created by this app or explicitly opened with it. This is not access to your entire Drive. Existing-folder import is not implemented.');
-    new Setting(containerEl).setName('Connection status').setDesc(this.plugin.auth.state.message)
+    const connectionStatus = new Setting(containerEl).setName('Connection status').setDesc(this.plugin.auth.state.message)
       .addButton(button => button.setButtonText('Open connection').onClick(() => this.plugin.showConnection()));
+    this.unsubscribe = this.plugin.subscribe(() => connectionStatus.setDesc(this.plugin.auth.state.message));
     containerEl.createEl('p', { text: 'Google projects left in External / Testing commonly issue refresh grants that expire after seven days for Drive access. Production setup and actual device persistence are separate validation steps.' });
   }
 }
