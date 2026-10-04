@@ -147,3 +147,22 @@ test('temporary refresh failure retries with backoff and recovers without sign-i
   await f.session.refreshIfNeeded(); assert.equal(f.session.state.status, 'connected');
   assert.equal(f.calls.length, 4);
 });
+
+test('callback routes only to the vault ID bound into state', () => {
+  const state = 'a'.repeat(43) + '.0123456789abcdef';
+  const response = parseCallback(new URLSearchParams({state, code: 'synthetic-code', vault: 'attacker-vault', path: '/untrusted'}));
+  const uri = new URL(callbackUri(response));
+  assert.equal(uri.searchParams.get('vault'), '0123456789abcdef');
+  assert.equal(uri.searchParams.has('path'), false);
+  assert.deepEqual(parseManualCallback(uri.toString()), response);
+  for (const suffix of ['.vault-name', '.0123456789abcdef.extra', '.abcd']) {
+    assert.throws(() => parseCallback(new URLSearchParams({state: 'a'.repeat(43) + suffix, code: 'synthetic-code'})));
+  }
+});
+test('routing state retains a random nonce and rejects a changed vault ID', async () => {
+  const session = new AuthSession({get: () => null, set: () => {}, clear: () => {}}, 'grant',
+    async () => { throw new Error('must not exchange'); }, () => client, () => {}, Date.now, () => '0123456789abcdef');
+  const state = new URL(await session.begin()).searchParams.get('state')!;
+  assert.match(state, /^[A-Za-z0-9_-]{43}\.0123456789abcdef$/);
+  await assert.rejects(session.complete({state: state.replace('0123456789abcdef','fedcba9876543210'), code: 'synthetic-code'}), /pending/);
+});

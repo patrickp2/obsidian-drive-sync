@@ -51,7 +51,11 @@ export default class DriveSyncPlugin extends Plugin {
     const secrets = secureStore(this.app);
     this.auth = new AuthSession(secrets, `drive-sync-${this.settings.instanceId}`, transport, () => ({
       clientId: this.settings.clientId.trim(), clientSecret: secrets.get(this.settings.clientSecretName) ?? ''
-    }), () => this.updateStatus());
+    }), () => this.updateStatus(), Date.now, () => {
+      // Obsidian's runtime vault ID avoids putting vault names or paths in OAuth
+      // state. This is not public API; absence retains the manual fallback.
+      return (this.app as App & { appId?: string }).appId;
+    });
     if (Platform.isDesktopApp) {
       this.statusEl = this.addStatusBarItem();
       this.statusEl.addClass('drive-sync-status');

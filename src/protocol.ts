@@ -1,7 +1,8 @@
 export const CALLBACK_URL = 'https://patrickp2.github.io/obsidian-drive-sync/';
 export const PROTOCOL_ACTION = 'drive-sync-auth';
 export const DRIVE_SCOPE = 'https://www.googleapis.com/auth/drive.file';
-export const STATE_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+export const STATE_PATTERN = /^[A-Za-z0-9_-]{43}(?:\.[a-f0-9]{16,64})?$/;
+export const VAULT_ID_PATTERN = /^[a-f0-9]{16,64}$/;
 
 export type AuthCallback = { state: string; code: string; error?: never } |
   { state: string; error: 'access_denied' | 'authorization_failed'; code?: never };
@@ -32,7 +33,12 @@ export function parseCallback(params: URLSearchParams): AuthCallback {
 }
 
 export function callbackUri(response: AuthCallback): string {
+  if (!STATE_PATTERN.test(response.state)) throw new Error('Invalid sign-in state.');
   const params = new URLSearchParams({ state: response.state });
+  // Routing is bound to the exact pending state; never forward a separate
+  // untrusted vault/path parameter supplied by the callback URL.
+  const vaultId = response.state.split('.')[1];
+  if (vaultId) params.set('vault', vaultId);
   if (response.code) params.set('code', response.code);
   else params.set('error', response.error!);
   return `obsidian://${PROTOCOL_ACTION}?${params}`;

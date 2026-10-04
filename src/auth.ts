@@ -1,4 +1,4 @@
-import { CALLBACK_URL, DRIVE_SCOPE, type AuthCallback } from './protocol';
+import { CALLBACK_URL, DRIVE_SCOPE, VAULT_ID_PATTERN, type AuthCallback } from './protocol';
 
 export interface ClientConfig { clientId: string; clientSecret: string }
 export interface SecretStore {
@@ -47,7 +47,8 @@ export class AuthSession {
   constructor(private readonly secrets: SecretStore, private readonly key: string,
     private readonly transport: Transport, private readonly getClient: () => ClientConfig,
     private readonly changed: (state: AuthState) => void = () => {},
-    private readonly now: () => number = Date.now) {}
+    private readonly now: () => number = Date.now,
+    private readonly getVaultId: () => string | undefined = () => undefined) {}
 
   private publish(status: AuthStatus, message: string): void {
     this.state = { status, message };
@@ -80,7 +81,8 @@ export class AuthSession {
     const client = this.client();
     const generation = ++this.generation;
     this.pending = null;
-    const state = randomValue();
+    const vaultId = this.getVaultId();
+    const state = randomValue() + (vaultId && VAULT_ID_PATTERN.test(vaultId) ? `.${vaultId}` : '');
     const verifier = randomValue();
     const challenge = await pkceChallenge(verifier);
     if (this.stopped || generation !== this.generation) throw new Error('Sign-in was cancelled.');
@@ -147,7 +149,7 @@ export class AuthSession {
     this.retryDelay = 30_000;
     this.accessToken = token;
     this.expiresAt = this.now() + data.expires_in * 1000;
-    this.publish('connected', 'Connected to Google. Sync is disabled in this prototype.');
+    this.publish('connected', previous ? 'Google access refreshed successfully. Sync is disabled in this prototype.' : 'Connected to Google. Sync is disabled in this prototype.');
   }
   refresh(): Promise<void> {
     if (this.refreshInFlight) return this.refreshInFlight;
