@@ -1,6 +1,6 @@
 {
   "name": "obsidian-drive-sync",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
   "description": "Google Drive Markdown sync beta with guarded edits and local device pairing",
   "scripts": {
@@ -17,6 +17,7 @@
     "typescript": "5.9.3"
   },
   "dependencies": {
+    "jsqr": "^1.4.0",
     "qrcode-generator": "2.0.4"
   }
 }

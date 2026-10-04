@@ -20,7 +20,8 @@ THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRI
 IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
 OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE. */\n`;
-await writeFile(pluginPath, qrLicense + await readFile(pluginPath, 'utf8'));
+const scannerLicense = '/*! jsQR 1.4.0 — Apache-2.0\n' + await readFile('node_modules/jsqr/LICENSE', 'utf8') + '\n*/\n';
+await writeFile(pluginPath, qrLicense + scannerLicense + await readFile(pluginPath, 'utf8'));
 await Promise.all(['manifest.json', 'styles.css'].map(file => copyFile(file, `dist/drive-sync/${file}`)));
 const callback = await build({ entryPoints: ['src/callback.ts'], bundle: true, format: 'iife',
   target: 'es2022', platform: 'browser', minify: true, write: false });

@@ -1,2 +1,7 @@
 .drive-sync-status { cursor: pointer; }
 .drive-sync-mobile-status { position: absolute; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 65px); z-index: 30; max-width: 75vw; font-size: 12px; padding: 6px 10px; border-radius: 12px; color: var(--text-normal); background: var(--background-secondary); box-shadow: var(--shadow-s); }
+
+.drive-sync-step { color: var(--text-muted); font-size: var(--font-ui-small); }
+.drive-sync-pair-qr { display: block; max-width: 100%; height: auto; margin: 1rem auto; image-rendering: pixelated; }
+.drive-sync-camera { width: 100%; max-height: 40vh; object-fit: cover; border-radius: var(--radius-m); background: black; }
+.drive-sync-camera[hidden] { display: none; }

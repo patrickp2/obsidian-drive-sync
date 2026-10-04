@@ -1,7 +1,7 @@
 {
   "id": "drive-sync",
   "name": "Drive Sync",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "minAppVersion": "1.12.7",
   "description": "Sync Markdown with your own Google Drive project. Development beta: test vaults only.",
   "author": "Patrick Peters",

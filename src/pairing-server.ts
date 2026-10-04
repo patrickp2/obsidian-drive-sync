@@ -3,7 +3,7 @@ import type { Server, IncomingMessage, ServerResponse } from 'node:http';
 
 export interface PairingServer { invitation: Invitation; close: () => void }
 // Loaded only on desktop; Node modules must remain external to the mobile bundle.
-export async function startPairing(config: PairingConfig, status: (message: string) => void,
+export async function startPairing(config: PairingConfig, status: (message: string, phase?: 'sent' | 'expired') => void,
   approve: () => Promise<boolean>): Promise<PairingServer> {
   const http = require('node:http') as typeof import('node:http');
   const os = require('node:os') as typeof import('node:os');
@@ -36,7 +36,7 @@ export async function startPairing(config: PairingConfig, status: (message: stri
       const encrypted = await seal(key, session, 'response', { nonce: (value as { nonce: string }).nonce, config: sharedConfig });
       response.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
       response.end(JSON.stringify(encrypted), () => {
-        status('Configuration sent. Complete Google sign-in on the other device.'); close();
+        status('Configuration sent. Complete Google sign-in on the other device.', 'sent'); close();
       });
     } catch { if (!response.headersSent) fail(403); }
   };
@@ -48,7 +48,7 @@ export async function startPairing(config: PairingConfig, status: (message: stri
     server.once('error', () => reject(new Error('Could not start a temporary local pairing listener.')));
     server.listen(0, address, resolve);
   });
-  timer = setTimeout(() => { status('Invitation expired. Open Add device to start again.'); close(); }, 3 * 60_000);
+  timer = setTimeout(() => { status('Invitation expired. Open Add device to start again.', 'expired'); close(); }, 3 * 60_000);
   const port = (server.address() as { port: number }).port;
   return { invitation: { address, port, session, key }, close };
 }

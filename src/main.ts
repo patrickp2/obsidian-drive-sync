@@ -3,7 +3,7 @@ import { AuthSession, type SecretStore, type Transport } from './auth';
 import { CALLBACK_URL, PROTOCOL_ACTION, parseCallback, parseManualCallback } from './protocol';
 import { runDriveProbe, type ProbeReport, type ProbeTransport } from './drive-probe';
 import { AddDeviceModal, ConnectDeviceModal, type PairingHost } from './pairing-ui';
-import { validateInvitation, validateConfig } from './pairing';
+import { validateInvitation, validateConfig, type Invitation } from './pairing';
 import { DriveStore } from './drive';
 import { SyncEngine, emptySyncState, syncPath, type SyncState, type LocalStore } from './sync';
 
@@ -57,6 +57,7 @@ export default class DriveSyncPlugin extends Plugin {
   private dirty = false;
   private engine?: SyncEngine;
   private probeRunning = false;
+  private pairingModal?: ConnectDeviceModal;
   probeReport?: ProbeReport;
   async onload(): Promise<void> {
     const saved = await this.loadData() as Partial<Settings> | null;
@@ -90,7 +91,7 @@ export default class DriveSyncPlugin extends Plugin {
       void this.run(async () => { await this.auth.complete(parseCallback(new URLSearchParams(params))); await this.syncNow(); });
     });
     this.registerObsidianProtocolHandler('drive-sync-pair', params => {
-      void this.run(async () => { new ConnectDeviceModal(this.app, this.pairingHost(), validateInvitation(params)).open(); });
+      void this.run(async () => { this.showPairing(validateInvitation(params)); });
     });
     this.addSettingTab(new DriveSyncSettings(this.app, this));
     const changed = () => { this.dirty = true; this.schedule(); };
@@ -226,10 +227,22 @@ export default class DriveSyncPlugin extends Plugin {
         if (store.get(key) !== config.clientSecret) throw new Error('Could not store paired configuration.');
         this.settings.clientId = config.clientId; this.settings.clientSecretName = key;
         this.settings.folderId = config.folderId; this.settings.folderPending = false; this.settings.syncEnabled = true;
-        await this.saveSettings(); this.setMessage('Configuration received · sign in to Google');
+        await this.saveSettings();
+        if (this.auth.state.status === 'connected') void this.syncNow();
+        else this.setMessage('Configuration received · sign in to Google');
       },
+      connected: () => this.auth.state.status === 'connected',
+      beginSignIn: () => this.auth.begin(),
+      subscribe: listener => this.subscribe(listener),
       registerCleanup: cleanup => this.register(cleanup)
     };
+  }
+  showPairing(invitation?: Invitation): void {
+    if (!this.pairingModal) {
+      this.pairingModal = new ConnectDeviceModal(this.app, this.pairingHost(), () => { this.pairingModal = undefined; });
+      this.pairingModal.open();
+    }
+    if (invitation) this.pairingModal.useInvitation(invitation);
   }
   async connect(verifyPkce?: 'wrong' | 'missing'): Promise<void> {
     const url = await this.auth.begin(verifyPkce);
@@ -247,7 +260,7 @@ export default class DriveSyncPlugin extends Plugin {
     if (!this.auth) return;
     this.statusEl?.setText(`Drive: ${this.syncMessage}`);
     this.mobileStatus?.setText(`Drive: ${this.syncMessage}`);
-    for (const listener of this.listeners) listener();
+    for (const listener of [...this.listeners]) listener();
   }
 }
 class BrowserSignInModal extends Modal {
@@ -276,8 +289,8 @@ class ConnectionModal extends Modal {
     const advanced = this.contentEl.createEl('details'); advanced.createEl('summary', { text: 'Connection and diagnostics' });
     new Setting(advanced).addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())))
       .addButton(b => b.setButtonText('Test refresh').onClick(() => void this.plugin.run(() => this.plugin.auth.refresh())));
-    new Setting(advanced).addButton(b => b.setButtonText('Paste return link').onClick(() => new ReturnLinkModal(this.app, this.plugin).open()))
-      .addButton(b => b.setButtonText('Run disposable file test').onClick(() => new DriveProbeModal(this.app, this.plugin).open()));
+    new Setting(advanced).addButton(b => b.setButtonText('Paste return link').onClick(() => { this.close(); new ReturnLinkModal(this.app, this.plugin).open(); }))
+      .addButton(b => b.setButtonText('Run disposable file test').onClick(() => { this.close(); new DriveProbeModal(this.app, this.plugin).open(); }));
     new Setting(advanced).setName('Disconnect and revoke access').setDesc('May also require other devices using this Google project to reconnect.')
       .addButton(b => b.setButtonText('Disconnect').onClick(() => void this.plugin.run(async () => { await this.plugin.setSyncEnabled(false); await this.plugin.auth.disconnect(); })));
   }
@@ -303,8 +316,8 @@ class DriveSyncSettings extends PluginSettingTab {
     this.unsubscribe?.(); const el = this.containerEl; el.empty();
     el.createEl('h2', { text: 'Drive Sync' });
     el.createEl('p', { text: 'Your own Google project, a normal Markdown folder in Drive, and a separate local vault on each device. Use a disposable vault while this beta is being validated.' });
-    if (Platform.isMobileApp) new Setting(el).setName('Set up from desktop').setDesc('Transfer Google configuration and the sync folder over your local network.')
-      .addButton(b => b.setButtonText('Connect to existing device').setCta().onClick(() => new ConnectDeviceModal(this.app, this.plugin.pairingHost()).open()));
+    if (Platform.isMobileApp && !this.plugin.settings.folderId) new Setting(el).setName('Set up from desktop').setDesc('Transfer Google configuration and the sync folder over your local network.')
+      .addButton(b => b.setButtonText('Connect to existing device').setCta().onClick(() => this.plugin.showPairing()));
     const connection = new Setting(el).setName('Google connection').setDesc(this.plugin.auth.state.message)
       .addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())));
     if ((!this.plugin.settings.folderId || this.plugin.settings.folderPending) && Platform.isDesktopApp) new Setting(el).setName('Sync folder').setDesc('Create a dedicated folder in Google Drive and begin syncing this test vault’s Markdown files.')
@@ -316,9 +329,11 @@ class DriveSyncSettings extends PluginSettingTab {
       if (Platform.isDesktopApp) new Setting(el).setName('Set up your phone').addButton(b => b.setButtonText('Add device').setCta().onClick(() => new AddDeviceModal(this.app, this.plugin.pairingHost()).open()));
     }
     const status = new Setting(el).setName('Sync status').setDesc(this.plugin.syncMessage).addButton(b => b.setButtonText('View details').onClick(() => this.plugin.showConnection()));
-    this.unsubscribe = this.plugin.subscribe(() => { connection.setDesc(this.plugin.auth.state.message); status.setDesc(this.plugin.syncMessage); });
+    const displayedFolder = this.plugin.settings.folderId;
+    this.unsubscribe = this.plugin.subscribe(() => { if (displayedFolder !== this.plugin.settings.folderId) { this.display(); return; } connection.setDesc(this.plugin.auth.state.message); status.setDesc(this.plugin.syncMessage); });
     const config = el.createEl('details'); config.open = !this.plugin.settings.clientId && Platform.isDesktopApp;
     config.createEl('summary', { text: Platform.isDesktopApp ? 'Google project configuration' : 'Advanced Google configuration' });
+    if (Platform.isMobileApp && this.plugin.settings.folderId) new Setting(config).addButton(b => b.setButtonText('Pair with desktop again').onClick(() => this.plugin.showPairing()));
     config.createEl('p', { text: 'Configure your own Google OAuth web client once on desktop. Add device transfers this configuration to your phone. Tokens stay on each device.' });
     new Setting(config).setName('Client ID').addText(t => t.setValue(this.plugin.settings.clientId).onChange(value => {
       if (this.plugin.settings.syncEnabled) { new Notice('Pause sync before changing Google configuration.'); return; }

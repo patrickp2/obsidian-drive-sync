@@ -2,7 +2,7 @@
 
 Drive Sync uses the Google Drive API on both desktop and iPhone. Each device has its own local Obsidian vault, and Drive stores ordinary Markdown files in one dedicated folder. No hosted token broker or pairing service is required.
 
-**0.2.0 is a development beta.** It syncs `.md` files up to 5 MB. Attachments and deletion propagation are not enabled. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
+**0.2.1 is a development beta.** It syncs `.md` files up to 5 MB. Attachments and deletion propagation are not enabled. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
 
 ## Setup at a glance
 
@@ -26,7 +26,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
    https://github.com/patrickp2/obsidian-drive-sync
    ```
 
-5. Select the **0.2.0** prerelease once it is published and enable Drive Sync. If that version is not listed, it has not been published yet; do not expect the new setup from an older release.
+5. Select the published **0.2.1** prerelease and enable Drive Sync. If BRAT does not list it immediately, refresh its release list. This setup requires 0.2.1 or newer.
 
 A GitHub account or personal access token is normally unnecessary for this public repository. If GitHub rate-limits BRAT, wait and retry. Plugins are installed per vault and per device. See [BRAT's guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md).
 
@@ -57,15 +57,15 @@ External projects left in Testing commonly issue seven-day Drive refresh grants.
 
 1. Install/update Obsidian. Create an empty local test vault with **Store in iCloud** off.
 2. Install and enable BRAT through **Settings → Community plugins**.
-3. In BRAT, add the same repository and select the same **0.2.0** release. Enable Drive Sync.
+3. In BRAT, add the same repository and select the same **0.2.1** release. Enable Drive Sync.
 4. Put the Mac and phone on the same private local network. Keep desktop Obsidian open.
 5. On desktop, open **Settings → Drive Sync → Add device**. A three-minute QR invitation appears.
-6. Scan that QR using the iPhone's Camera and open the invitation in Obsidian. Choose **Connect to desktop**, then approve the request on the Mac. If camera handoff is unavailable, **Connect to existing device** accepts the one-time invitation copied from the desktop panel. No individual client fields need to be copied.
+6. On the phone, choose **Connect to existing device → Scan QR**. Scan the desktop QR, then choose **Approve device** on the Mac. All phone steps stay in one panel. **Take QR photo** is available if the live camera is unsupported; a one-time invitation paste is under the alternative options. No individual client fields need to be copied.
 7. Allow local-network access if iOS requests it for this pairing. Guest networks or client isolation can prevent devices from reaching each other.
-8. After configuration is received, close the pairing panel and choose **Sign in to Google → Continue to Google**. Sign into the same Google account and return to Obsidian.
+8. Continue through the Google step in the same panel. Sign into the same Google account and return to Obsidian. Devices already signed in skip this step. Choose **Done** at Setup complete.
 9. Wait for **Synced with Drive**. Create a synthetic note on desktop, verify it arrives on the phone, edit it on the phone, and verify the edit returns to desktop before using any important data.
 
-Pairing is implemented but must pass the real-iPhone network/handoff test before being described as verified. Its invitation contains a temporary pairing key, not Google credentials. Keep the QR/link private. Configuration is encrypted before crossing the local network; the listener expires after three minutes or when the desktop panel closes. Access/refresh tokens are never transferred. Closing the panel before completion cancels pairing.
+Encrypted pairing, configuration storage, and initial sync passed on the real iPhone with the external Camera handoff in 0.2.0. The new 0.2.1 in-app scanner still needs physical-camera validation. Its invitation contains a temporary pairing key, not Google credentials. Keep the QR/link private. Configuration is encrypted before crossing the local network; the listener expires after three minutes or when the desktop panel closes. Access/refresh tokens are never transferred. Closing the panel before completion cancels pairing.
 
 ## Everyday use
 
