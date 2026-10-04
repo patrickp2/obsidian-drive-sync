@@ -3,6 +3,7 @@ import type { AuthCallback } from './protocol';
 import { loadState, recordRename, recordDeletion } from './state';
 import { markdown, MAX_FILE_BYTES } from './content';
 import { localStore } from './local';
+import { recoveryPath, recoveryStorage } from './recovery';
 import { App, MarkdownView, Modal, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting, TFile, requestUrl } from 'obsidian';
 import { AuthSession, type SecretStore, type Transport } from './auth';
 import { CALLBACK_URL, PROTOCOL_ACTION, parseCallback, parseManualCallback } from './protocol';
@@ -176,18 +177,14 @@ export default class DriveSyncPlugin extends Plugin {
     if (enabled) await this.syncNow(); else this.setMessage('Paused');
   }
   private localStore(): LocalStore {
-    const folders = async (path: string) => {
-      const parts = path.split('/'); parts.pop(); let folder = '';
-      for (const part of parts) {
-        folder = folder ? `${folder}/${part}` : part;
-        if (!this.app.vault.getAbstractFileByPath(folder)) await this.app.vault.createFolder(folder);
-      }
-    };
+    const recovery = recoveryStorage(this.app.vault.adapter);
+    const folders = (path: string) => recovery.folders(path, folder => this.app.vault.createFolder(folder));
     const excluded = (path: string) => path === this.app.vault.configDir || path.startsWith(`${this.app.vault.configDir}/`);
     return localStore({
       list: () => this.app.vault.getFiles().map(f => f.path).filter(path => path !== this.app.vault.configDir && !path.startsWith(`${this.app.vault.configDir}/`)),
       read: async path => {
         if (excluded(path)) throw new Error('Obsidian configuration is excluded from sync.');
+        if (recoveryPath(path)) return recovery.read(path);
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!file) return null;
         if (!(file instanceof TFile) || file.stat.size > MAX_FILE_BYTES) throw new Error(`Unsupported or oversized file (20 MB limit): ${path}`);
@@ -200,6 +197,8 @@ export default class DriveSyncPlugin extends Plugin {
         else await this.app.vault.createBinary(path, content);
       },
       rename: async (path, destination) => {
+        if (excluded(path) || excluded(destination)) throw new Error('Obsidian configuration is excluded from sync.');
+        if (recoveryPath(path)) { await folders(destination); await recovery.restore(path, destination); return; }
         const file = this.app.vault.getAbstractFileByPath(path);
         if (!(file instanceof TFile)) throw new Error('Source file changed.');
         await folders(destination); await this.app.vault.rename(file, destination);

@@ -57,4 +57,8 @@ The complete disposable API probe passed on the real iPhone in 0.3.0, including 
 
 ## Current authorization and folder setup
 
-The user approved full Drive authorization for seamless existing-folder sync and external additions. Version 0.4.0 removes Picker/import code and provides an in-plugin folder browser with an explicit preview and connection step. Whole-Drive token access is disclosed; only configured-folder files are synchronized. Both devices must reconnect once. Google Picker API remains enabled in the test project but is unused; billing remains unlinked. Broader consent and device tests are pending.
+The user approved full Drive authorization for seamless existing-folder sync and external additions. Version 0.4.0 removes Picker/import code and provides an in-plugin folder browser with an explicit preview and connection step. Whole-Drive token access is disclosed; only configured-folder files are synchronized. Both devices must reconnect once. Google Picker API remains enabled in the test project but is unused; billing remains unlinked. Full-Drive consent completed on both the Mac and real iPhone in 0.4.0; both reported Connected to Google. The desktop recovered the interrupted rapid rename with unique file IDs and an empty rename journal. Further lifecycle checks are recorded below.
+
+## Hidden recovery storage regression
+
+The real iPhone in 0.4.0 stopped an incoming rename with “Folder already exists.” Obsidian excludes hidden `.trash` folders from its indexed Vault API. Version 0.4.1 checks physical folders through the storage adapter, reads hidden backup bytes through the adapter, and restores hidden sources through the adapter. Visible note operations still use the Vault API. Three regression tests cover consecutive moves/removals with pre-existing hidden trash, restoring a late binary edit, and occupied/invalid recovery paths. All 80 tests and the build credential scan pass. Real-device verification of this fix is pending.
