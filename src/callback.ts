@@ -13,7 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (fragment) throw new Error('Unexpected callback fragment.');
     const response = parseCallback(new URLSearchParams(query));
     const uri = callbackUri(response);
-    status.textContent = response.error ? 'Sign-in was declined or could not be completed. Return to Obsidian to continue.' : 'Return to Obsidian to finish connecting Google. Your notes are not being synchronized by this prototype.';
+    status.textContent = response.error ? 'Sign-in was declined or could not be completed. Return to Obsidian to continue.' : 'Return to Obsidian to finish connecting Google. The plugin will show your connection and sync status.';
     const open = document.createElement('a');
     open.textContent = 'Return to Obsidian'; open.href = uri; open.className = 'button';
     actions.append(open);

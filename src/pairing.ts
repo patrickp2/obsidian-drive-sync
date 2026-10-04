@@ -1,4 +1,4 @@
-export interface PairingConfig { clientId: string; clientSecret: string; folderId?: string }
+export interface PairingConfig { clientId: string; clientSecret: string; folderId?: string; vaultName?: string }
 export interface Invitation { address: string; port: number; session: string; key: string }
 export interface Envelope { iv: string; ciphertext: string }
 const encode = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -41,8 +41,9 @@ export function validateConfig(value: unknown): PairingConfig {
       (config.folderId !== undefined && (typeof config.folderId !== 'string' || !/^[A-Za-z0-9_-]+$/.test(config.folderId)))) {
     throw new Error('Invalid desktop configuration.');
   }
+  if (config.vaultName !== undefined && (typeof config.vaultName !== 'string' || !config.vaultName.trim() || config.vaultName.length > 200 || /[\x00-\x1f\x7f]/.test(config.vaultName))) throw new Error('Invalid vault name.');
   // Copy only configuration; tokens and other fields are never imported.
-  return { clientId: config.clientId, clientSecret: config.clientSecret, ...(config.folderId ? { folderId: config.folderId as string } : {}) };
+  return { clientId: config.clientId, clientSecret: config.clientSecret, ...(config.folderId ? { folderId: config.folderId as string } : {}), ...(config.vaultName ? { vaultName: config.vaultName as string } : {}) };
 }
 export async function seal(key: string, session: string, direction: 'request' | 'response', value: unknown): Promise<Envelope> {
   const iv = crypto.getRandomValues(new Uint8Array(12));

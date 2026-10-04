@@ -28,3 +28,7 @@ test('invitations reject public endpoints, credentials, duplicate keys and inval
   assert.throws(() => parseInvitation(invitationLink(invitation) + '&key=duplicate'));
   assert.throws(() => validateConfig({ ...config, clientSecret: '' }));
 });
+test('pairing conveys a vault label without accepting unsafe or unrelated fields', () => {
+  assert.deepEqual(validateConfig({ ...config, vaultName: 'Work', tokens: 'not imported' }), { ...config, vaultName: 'Work' });
+  assert.throws(() => validateConfig({ ...config, vaultName: 'name\nspoof' }));
+});

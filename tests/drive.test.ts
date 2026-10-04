@@ -35,3 +35,27 @@ test('complete paginated listings are required; duplicates and incomplete search
   duplicate = true; await assert.rejects(store.list(), /Duplicate/);
   duplicate = false; incomplete = true; await assert.rejects(store.list(), /incomplete/);
 });
+test('binary multipart transfers preserve arbitrary bytes and correct MIME', async () => {
+  const calls: ProbeRequest[] = [];
+  const store = new DriveStore(async request => { calls.push(request); return reply({ id: 'file' }); }, 'root');
+  const data = Uint8Array.of(0, 255, 128, 13, 10).buffer;
+  await store.create('photo.png', data, 'file');
+  const body = new Uint8Array(calls[0]!.body as ArrayBuffer);
+  const marker = new TextEncoder().encode('Content-Type: image/png\r\n\r\n');
+  const at = body.findIndex((_, i) => marker.every((v, j) => body[i + j] === v));
+  assert.ok(at > 0); assert.deepEqual(body.slice(at + marker.length, at + marker.length + 5), new Uint8Array(data));
+});
+test('metadata move and trash require strong If-Match and use v2 PUT', async () => {
+  const calls: ProbeRequest[] = [];
+  const store = new DriveStore(async request => { calls.push(request); return reply({}, 412); }, 'root');
+  await assert.rejects(store.move({ id: 'file', path: 'a.md' }, 'b.md', '"old"'), StaleWrite);
+  await assert.rejects(store.trash({ id: 'file', path: 'a.md' }, '"old"'), StaleWrite);
+  assert.ok(calls.every(c => c.method === 'PUT' && c.url.includes('/drive/v2/files/file') && c.headers?.['If-Match'] === '"old"'));
+  assert.equal(JSON.parse(calls[1]!.body as string).labels.trashed, true);
+});
+test('missing permission is distinct from confirmed Drive trash', async () => {
+  let status = 404;
+  const store = new DriveStore(async () => reply({ trashed: true }, status), 'root');
+  assert.equal(await store.missing('file'), 'unavailable'); status = 403; await assert.rejects(store.missing('file'));
+  status = 200; assert.equal(await store.missing('file'), 'trashed');
+});

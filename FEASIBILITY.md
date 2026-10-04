@@ -24,7 +24,7 @@ Core tests cover desktop-to-phone-to-desktop edits using two independent simulat
 
 The real desktop test vault `drive-sync-auth` created its dedicated Drive folder and uploaded `README.md` and `Sync test.md` automatically. Further real-device results belong in DEVELOPMENT.md.
 
-Current beta limits: Markdown only, at most 5 MB per note; attachments are not transferred; intentional deletions and remote moves are preserved for review rather than propagated automatically. Concurrent creation of duplicate Drive folder/file names stops reconciliation for review. No initial import of arbitrary pre-existing Drive folders is implemented. Do not use this beta on important notes yet.
+Version 0.3.0 adds byte-preserving attachments (20 MB/file), baseline-bound folder identity, persistent rename intent, version-guarded v2 metadata moves/trash, and local recovery copies. A 404 or move outside the configured tree never triggers local deletion. Version comparisons avoid downloads for unchanged content. Existing-file import uses explicit Google Picker selection and preserves the source; whole-folder adoption is not implemented. Empty folders are not synchronized. Use disposable vaults until broader live tests pass.
 
 The same v2 conditional-write probe also passed on the real iPhone in 0.2.1: baseline Unicode round trip, current-ETag write, stale-ETag HTTP 412 with newer content preserved, then successful fresh-ETag write. Its temporary resources were moved to Drive trash.
 
@@ -40,7 +40,7 @@ External Google projects in Testing commonly issue seven-day Drive refresh grant
 
 ## Pairing and storage
 
-Add device now creates a temporary desktop listener bound to a private IPv4 interface. Its three-minute QR invitation carries a random 256-bit pairing key. AES-GCM authenticates/encrypts each direction with the session ID and direction bound as associated data; a request nonce binds the response. Desktop approval and one-use consumption are required. Configuration transfer includes the client ID, client secret, and Drive folder ID only. Tokens and pending OAuth state never transfer. Closing the panel, unloading, or expiry closes the listener. The QR/link must remain private. No hosted relay is involved.
+Add device now creates a temporary desktop listener bound to a private IPv4 interface. Its three-minute QR invitation carries a random 256-bit pairing key. AES-GCM authenticates/encrypts each direction with the session ID and direction bound as associated data; a request nonce binds the response. Desktop approval and one-use consumption are required. Configuration transfer includes the client ID, client secret, Drive folder ID, and a vault display name. Tokens and pending OAuth state never transfer. Closing the panel, unloading, or expiry closes the listener. The QR/link must remain private. No hosted relay is involved.
 
 Cryptographic tests cover wrong keys/sessions, reflected envelopes, replayed responses, and invalid endpoints. A real local-network listener round trip on the Mac passed with synthetic credentials. Actual iPhone external-Camera QR handoff, local networking, desktop approval, paired configuration storage, and initial Markdown download passed in 0.2.0. Phone edits reached the Mac, Mac replies reached the phone, and independent edits after pausing the phone preserved both branches; the conflict copy also reached the Mac. Version 0.2.1 replaces stacked pairing dialogs with a single step flow and local QR scanning; the user completed an in-app live QR scan on the real iPhone, and the connected, automatically syncing state was verified afterward.
 
@@ -52,4 +52,10 @@ Only `drive.file` is requested. The plugin restricts operations to the dedicated
 
 The dedicated test Google project has no linked billing account. No paid compute or hosted pairing/token service was created. Recheck [Drive API billing/limits](https://developers.google.com/workspace/drive/api/guides/limits) before enabling paid services or expanding usage.
 
-Remaining gates include full desktop application restart, additional live denial/revocation/interruption tests, production OAuth suitability, attachment support, recoverable deletion/rename reconciliation, and broader stress testing. A successful connection or one conditional-write test alone is not full production readiness.
+Remaining gates include full desktop application restart, real-iPhone attachment/move/trash and fault tests for 0.3.0, the new Google Picker flow, live revoked-grant tests, production OAuth suitability, and real-network stress testing. Automated fault tests and a 2,000-file simulation pass; these do not establish iOS suspension behavior. A successful connection or one conditional-write test alone is not full production readiness.
+
+## 0.3.0 desktop lifecycle evidence (2026-10-04)
+
+The Obsidian-hosted probe used the actual DriveStore and requestUrl transport against two synthetic roots. Identical paths remained isolated. Multipart binary creation and replacement preserved all byte values. Stale binary replacement, rename/parent move, and trash each returned HTTP 412. Current rename/move retained the ID and bytes; current trash was confirmed by metadata and absence from a complete listing. The other root was unchanged. All probe resources were moved to Drive trash.
+
+Google Picker API was enabled in the dedicated test project with user approval. No billing account was added. Google currently documents standard Drive API use at no additional cost and planned future charges above included usage thresholds; check the linked limits page before changing billing or quotas.

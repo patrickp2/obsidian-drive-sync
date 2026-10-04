@@ -1,12 +1,27 @@
+import { equalContent, type Content } from '../src/content';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SyncEngine, StaleWrite, emptySyncState, type LocalStore, type RemoteStore, type RemoteFile } from '../src/sync';
 function fixture() {
-  const files = new Map<string, { id: string; content: string; version: number }>();
+  const files = new Map<string, { id: string; content: Content; version: number }>();
+  const trashed = new Map<string, Content>();
   let next = 0; let failList = false; let race: (() => void) | undefined;
   const remote: RemoteStore = {
     list: async () => { if (failList) throw new Error('offline'); return [...files].map(([path, f]) => ({ path, id: f.id })); },
     read: async f => { const row = files.get(f.path)!; return { content: row.content, etag: `"${row.version}"` }; },
+    missing: async id => trashed.has(id) ? 'trashed' : 'unavailable',
+    trash: async (file, etag) => {
+      race?.(); race = undefined;
+      const row = files.get(file.path)!;
+      if (etag !== `"${row.version}"`) throw new StaleWrite();
+      trashed.set(row.id, row.content); files.delete(file.path);
+    },
+    move: async (file, path, etag) => {
+      const row = files.get(file.path)!;
+      if (etag !== `"${row.version}"`) throw new StaleWrite();
+      if (files.has(path)) throw new Error('occupied');
+      files.delete(file.path); files.set(path, { ...row, version: row.version + 1 });
+    },
     reserveId: async () => `id-${++next}`,
     create: async (path, content, id) => { if (![...files.values()].some(f => f.id === id)) files.set(path, { id, content, version: 1 }); },
     update: async (f, content, etag) => {
@@ -17,20 +32,29 @@ function fixture() {
     }
   };
   function device() {
-    const notes = new Map<string, string>(); const state = emptySyncState(); let applyRace: (() => void) | undefined;
+    const notes = new Map<string, Content>(); const state = emptySyncState(); let applyRace: (() => void) | undefined;
     let saves = 0;
     const local: LocalStore = {
       list: async () => [...notes.keys()], read: async path => notes.get(path) ?? null,
+      trash: async (path, expected) => {
+        applyRace?.(); applyRace = undefined;
+        if (!equalContent(notes.get(path) ?? null, expected)) return false;
+        notes.delete(path); return true;
+      },
+      move: async (path, destination, expected) => {
+        if (notes.has(destination) || !equalContent(notes.get(path) ?? null, expected)) return false;
+        notes.set(destination, expected); notes.delete(path); return true;
+      },
       replace: async (path, expected, content) => {
         applyRace?.(); applyRace = undefined;
-        if ((notes.get(path) ?? null) !== expected) return false;
+        if (!equalContent(notes.get(path) ?? null, expected)) return false;
         notes.set(path, content); return true;
       }
     };
     const make = () => new SyncEngine(local, remote, state, async () => { saves++; });
     return { notes, state, engine: make(), restart: make, race: (fn: () => void) => { applyRace = fn; }, saves: () => saves };
   }
-  return { files, remote, device, offline: (value: boolean) => { failList = value; }, race: (fn: () => void) => { race = fn; } };
+  return { files, trashed, remote, device, offline: (value: boolean) => { failList = value; }, race: (fn: () => void) => { race = fn; } };
 }
 test('desktop to mobile and back uses ordinary files and a persisted baseline', async () => {
   const f = fixture(); const mac = f.device(); const phone = f.device();
@@ -86,8 +110,97 @@ test('concurrent sync requests share one operation and stopped engines cannot ru
   const f = fixture(); const a = f.device(); assert.equal(a.engine.run(), a.engine.run());
   await a.engine.run(); a.engine.stop(); await assert.rejects(a.engine.run(), /stopped/);
 });
-test('intentional local deletion preserves remote pending review', async () => {
+test('intentional local deletion moves an unchanged remote to trash', async () => {
   const f = fixture(); const a = f.device(); a.notes.set('note.md', 'A'); await a.engine.run();
   a.notes.delete('note.md'); a.state.deleted['note.md'] = true;
-  assert.equal((await a.engine.run()).pending.length, 1); assert.equal(f.files.get('note.md')!.content, 'A'); assert.equal(a.notes.has('note.md'), false);
+  assert.equal((await a.engine.run()).pending.length, 0); assert.equal(f.files.has('note.md'), false); assert.equal(f.trashed.size, 1); assert.equal(a.notes.has('note.md'), false);
+});
+test('attachments preserve exact non-text bytes and their extensions through conflicts', async () => {
+  const f = fixture(), a = f.device(), b = f.device();
+  const first = Uint8Array.of(0, 255, 128, 13, 10).buffer;
+  a.notes.set('images/photo.png', first); await a.engine.run(); await b.engine.run();
+  assert.deepEqual(b.notes.get('images/photo.png'), first);
+  a.notes.set('images/photo.png', Uint8Array.of(1, 255).buffer);
+  b.notes.set('images/photo.png', Uint8Array.of(2, 255).buffer);
+  await a.engine.run(); const result = await b.engine.run();
+  assert.match(result.conflicts[0]!, /\.png$/);
+  assert.deepEqual(b.notes.get(result.conflicts[0]!), Uint8Array.of(2, 255).buffer);
+});
+test('two vaults with the same paths never share baselines or remote changes', async () => {
+  const work = fixture(), personal = fixture();
+  const w = work.device(), p = personal.device();
+  w.notes.set('note.md', 'work'); p.notes.set('note.md', 'personal');
+  await Promise.all([w.engine.run(), p.engine.run()]);
+  w.notes.set('note.md', 'work edit'); await w.engine.run(); await p.engine.run();
+  assert.equal(p.notes.get('note.md'), 'personal'); assert.equal(personal.files.get('note.md')!.content, 'personal');
+});
+test('local rename preserves Drive identity and remote rename reaches the other device', async () => {
+  const f = fixture(), a = f.device(), b = f.device();
+  a.notes.set('old.md', 'A'); await a.engine.run(); await b.engine.run();
+  const id = f.files.get('old.md')!.id;
+  a.notes.delete('old.md'); a.notes.set('Folder/new.md', 'B'); a.state.renames = { 'old.md': 'Folder/new.md' };
+  await a.engine.run(); await a.restart().run(); await b.engine.run();
+  assert.equal(f.files.get('Folder/new.md')!.id, id); assert.equal(f.files.size, 1);
+  assert.equal(b.notes.get('Folder/new.md'), 'B'); assert.equal(b.notes.has('old.md'), false);
+});
+test('unknown rename outcome is recovered by file ID after restart', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('old.md', 'A'); await a.engine.run();
+  a.notes.delete('old.md'); a.notes.set('new.md', 'A'); a.state.renames = { 'old.md': 'new.md' };
+  const move = f.remote.move!; f.remote.move = async (...args) => { await move(...args); throw new Error('lost response'); };
+  await assert.rejects(a.engine.run()); await a.restart().run();
+  assert.equal(f.files.size, 1); assert.equal(a.state.baseline['old.md'], undefined); assert.ok(a.state.baseline['new.md']);
+});
+test('rename collision preserves both files and blocks content writes to either path', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('old.md', 'A'); a.notes.set('new.md', 'B'); await a.engine.run();
+  a.notes.delete('old.md'); a.notes.set('new.md', 'A'); a.state.renames = { 'old.md': 'new.md' };
+  const r = await a.engine.run(); assert.equal(r.pending.length, 1); assert.equal(f.files.get('new.md')!.content, 'B'); assert.equal(f.files.get('old.md')!.content, 'A');
+});
+test('remote trash preserves a concurrently edited local branch', async () => {
+  const f = fixture(), a = f.device(), b = f.device(); a.notes.set('note.md', 'A'); await a.engine.run(); await b.engine.run();
+  a.notes.delete('note.md'); a.state.deleted['note.md'] = true; b.notes.set('note.md', 'offline edit');
+  await a.engine.run(); const r = await b.engine.run();
+  assert.equal(b.notes.get(r.conflicts[0]!), 'offline edit'); assert.equal(b.notes.has('note.md'), false);
+  await b.engine.run(); await a.engine.run(); assert.ok([...a.notes.values()].includes('offline edit'));
+});
+test('local delete versus remote edit restores the edit, including a last-moment race', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('note.md', 'A'); await a.engine.run();
+  a.notes.delete('note.md'); a.state.deleted['note.md'] = true;
+  f.race(() => { const row = f.files.get('note.md')!; row.content = 'new edit'; row.version++; });
+  assert.equal((await a.engine.run()).pending.length, 1); await a.engine.run();
+  assert.equal(a.notes.get('note.md'), 'new edit'); assert.equal(f.trashed.size, 0);
+});
+test('trash success with a lost response recovers without resurrecting the file', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('note.md', 'A'); await a.engine.run();
+  a.notes.delete('note.md'); a.state.deleted['note.md'] = true;
+  const trash = f.remote.trash!; f.remote.trash = async (...args) => { await trash(...args); throw new Error('network lost'); };
+  await assert.rejects(a.engine.run()); await a.restart().run(); assert.equal(f.files.size, 0); assert.equal(Object.keys(a.state.baseline).length, 0);
+});
+test('two thousand files survive restart and interrupted updates without duplicates', async () => {
+  const f = fixture(), a = f.device(), b = f.device();
+  for (let i = 0; i < 2000; i++) a.notes.set(`notes/${i}.md`, `note ${i}`);
+  await a.engine.run(); await b.engine.run(); assert.equal(b.notes.size, 2000);
+  a.notes.set('notes/1.md', 'edited'); const update = f.remote.update;
+  f.remote.update = async (...args) => { await update(...args); throw new Error('force close after upload'); };
+  await assert.rejects(a.engine.run()); await a.restart().run(); await b.engine.run();
+  assert.equal(b.notes.get('notes/1.md'), 'edited'); assert.equal(f.files.size, 2000);
+});
+test('case-colliding remote names abort before any local writes', async () => {
+  const f = fixture(), a = f.device();
+  f.files.set('NOTE.md', { id: 'a', content: 'A', version: 1 }); f.files.set('note.md', { id: 'b', content: 'B', version: 1 });
+  await assert.rejects(a.engine.run(), /collision/); assert.equal(a.notes.size, 0);
+});
+test('unchanged listed versions avoid downloading contents again', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('note.md', 'A'); await a.engine.run();
+  f.remote.list = async () => [{ id: f.files.get('note.md')!.id, path: 'note.md', version: '1' }];
+  const read = f.remote.read; let reads = 0;
+  f.remote.read = async file => { reads++; return { ...await read(file), version: '1' }; };
+  await a.engine.run(); await a.engine.run(); assert.equal(reads, 1);
+  a.notes.set('note.md', 'local edit'); await a.engine.run(); assert.equal(reads, 2);
+});
+test('deletion while the first upload is in flight is not forgotten', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('note.md', 'A');
+  const create = f.remote.create;
+  f.remote.create = async (...args) => { await create(...args); a.notes.delete('note.md'); a.state.deleted['note.md'] = true; };
+  await a.engine.run(); assert.equal(a.state.deleted['note.md'], true);
+  await a.engine.run(); assert.equal(f.files.size, 0); assert.equal(f.trashed.size, 1);
 });

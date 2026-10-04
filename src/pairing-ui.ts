@@ -24,7 +24,7 @@ export class AddDeviceModal extends Modal {
   private approval?: (approved: boolean) => void;
   constructor(app: App, private readonly host: PairingHost) { super(app); }
   onOpen(): void {
-    this.setTitle('Add device');
+    this.setTitle(`Add device · ${this.app.vault.getName()}`);
     void this.prepare();
     this.host.registerCleanup(() => this.close());
   }
@@ -80,7 +80,7 @@ export class ConnectDeviceModal extends Modal {
   };
   constructor(app: App, private readonly host: PairingHost, private readonly finished: () => void) { super(app); }
   onOpen(): void {
-    this.setTitle('Connect this device');
+    this.setTitle(`Connect vault · ${this.app.vault.getName()}`);
     this.contentEl.ownerDocument.addEventListener('visibilitychange', this.visibility);
     this.showScan();
     this.unsubscribe = this.host.subscribe(() => { if (this.waitingForGoogle && this.host.connected()) this.showReady(); });
@@ -133,10 +133,18 @@ export class ConnectDeviceModal extends Modal {
           return response.text;
         });
         if (this.closed || operation !== this.operation) return;
-        await this.host.accept(config);
-        if (this.closed || operation !== this.operation) return;
-        this.busy = false;
-        if (this.host.connected()) this.showReady(); else this.showGoogle();
+        step(this.contentEl, 2, 'Confirm the vault', `Connect this local vault “${this.app.vault.getName()}” to “${config.vaultName ?? 'Desktop vault'}” on Drive? Each vault needs its own Drive folder.`);
+        this.contentEl.createEl('p', { text: `Drive folder: ${config.folderId ?? 'missing'}` });
+        new Setting(this.contentEl).addButton(b => b.setButtonText('Connect this vault').setCta().onClick(() => {
+          b.setDisabled(true);
+          void this.host.accept(config).then(() => {
+            if (this.closed || operation !== this.operation) return;
+            this.busy = false;
+            if (this.host.connected()) this.showReady(); else this.showGoogle();
+          }).catch(error => {
+            if (!this.closed && operation === this.operation) this.showScan(error instanceof Error ? error.message : 'Could not connect this vault.');
+          });
+        })).addButton(b => b.setButtonText('Cancel').onClick(() => this.close()));
       } catch {
         if (!this.closed && operation === this.operation) this.showScan('Could not complete pairing. Check the same Wi-Fi and desktop approval, then scan a new invitation.');
       }
@@ -162,7 +170,7 @@ export class ConnectDeviceModal extends Modal {
   }
   private showReady(): void {
     this.waitingForGoogle = false;
-    step(this.contentEl, 4, 'Setup complete', 'This device is connected. Drive Sync will check your Markdown notes automatically. The sync indicator shows when the first check finishes.');
+    step(this.contentEl, 4, 'Setup complete', 'This device is connected. Drive Sync will check your notes and attachments automatically. The sync indicator shows when the first check finishes.');
     new Setting(this.contentEl).addButton(b => b.setButtonText('Done').setCta().onClick(() => this.close()));
   }
   onClose(): void { this.closed = true; this.operation++; this.camera?.stop(); this.unsubscribe?.(); this.contentEl.ownerDocument.removeEventListener('visibilitychange', this.visibility); this.contentEl.empty(); this.finished(); }

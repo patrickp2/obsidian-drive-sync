@@ -1,3 +1,4 @@
+import { bytes, markdown, mimeType, MAX_FILE_BYTES, type Content } from './content';
 import { StaleWrite, syncPath, type RemoteFile, type RemoteRead, type RemoteStore } from './sync';
 import type { ProbeRequest, ProbeResponse, ProbeTransport } from './drive-probe';
 const API = 'https://www.googleapis.com/drive/v3/files';
@@ -45,7 +46,7 @@ export class DriveStore implements RemoteStore {
       seenFolders.add(folder);
       const names = new Set<string>(); let page = ''; const pages = new Set<string>();
       do {
-        const params = new URLSearchParams({ q: `'${folder}' in parents and trashed = false`, fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType)', pageSize: '1000', spaces: 'drive' });
+        const params = new URLSearchParams({ q: `'${folder}' in parents and trashed = false`, fields: 'nextPageToken,incompleteSearch,files(id,name,mimeType,version)', pageSize: '1000', spaces: 'drive' });
         if (page) params.set('pageToken', page);
         const data = object(await this.request({ url: `${API}?${params}`, method: 'GET' }));
         if (data.incompleteSearch || !Array.isArray(data.files)) throw new Error('Drive returned an incomplete folder listing.');
@@ -56,7 +57,7 @@ export class DriveStore implements RemoteStore {
           names.add(name);
           const path = prefix + name;
           if (item.mimeType === FOLDER) { this.folders.set(path, id); await walk(id, `${path}/`); }
-          else if (syncPath(path) && !String(item.mimeType).startsWith('application/vnd.google-apps.')) result.push({ id, path });
+          else if (syncPath(path) && !String(item.mimeType).startsWith('application/vnd.google-apps.')) result.push({ id, path, version: typeof item.version === 'string' ? item.version : undefined });
         }
         page = data.nextPageToken ?? '';
         if (typeof page !== 'string' || page && pages.has(page)) throw new Error('Invalid Drive pagination.');
@@ -65,23 +66,39 @@ export class DriveStore implements RemoteStore {
     };
     await walk(this.folderId, ''); return result;
   }
-  private async metadata(file: RemoteFile): Promise<{ etag: string }> {
-    const data = object(await this.request({ url: `${V2}/${identifier(file.id)}?fields=id,etag,title,labels,parents,fileSize`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } }));
-    if (data.labels?.trashed || typeof data.etag !== 'string' || !/^"[^"\r\n]+"$/.test(data.etag) || Number(data.fileSize) > 5 * 1024 * 1024) {
+  private async metadata(file: RemoteFile): Promise<{ etag: string; version?: string }> {
+    const data = object(await this.request({ url: `${V2}/${identifier(file.id)}?fields=id,etag,title,labels,parents,fileSize,version`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } }));
+    if (data.labels?.trashed || typeof data.etag !== 'string' || !/^"[^"\r\n]+"$/.test(data.etag) || Number(data.fileSize) > MAX_FILE_BYTES) {
       throw new Error('File is trashed, too large, or has no strong write validator.');
     }
     const parentPath = file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '';
     const expectedParent = this.folders.get(parentPath);
     if (data.title !== file.path.split('/').at(-1) || !expectedParent || !Array.isArray(data.parents) ||
         data.parents.length !== 1 || data.parents[0]?.id !== expectedParent) throw new Error('A Drive file moved or was renamed during synchronization. Retry after reviewing the folder.');
-    return { etag: data.etag };
+    return { etag: data.etag, version: typeof data.version === 'string' ? data.version : undefined };
   }
   async read(file: RemoteFile): Promise<RemoteRead> {
     const before = await this.metadata(file);
-    const content = (await this.request({ url: `${API}/${identifier(file.id)}?alt=media`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } })).text;
+    const response = await this.request({ url: `${API}/${identifier(file.id)}?alt=media`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } });
+    const content = markdown(file.path) ? response.text : response.arrayBuffer;
+    if (content === undefined || bytes(content).byteLength > MAX_FILE_BYTES) throw new Error('Missing binary response or file exceeds 20 MB.');
     const after = await this.metadata(file);
     if (before.etag !== after.etag) throw new StaleWrite();
-    return { content, etag: after.etag };
+    return { content, etag: after.etag, version: after.version };
+  }
+  /** Only called for IDs returned by an explicitly initiated Google Picker flow. */
+  async readSelected(id: string): Promise<RemoteRead & { name: string }> {
+    const get = async () => object(await this.request({ url: `${V2}/${identifier(id)}?fields=id,etag,title,mimeType,labels,fileSize`, method: 'GET' }));
+    const before = await get();
+    if (before.labels?.trashed || String(before.mimeType).startsWith('application/vnd.google-apps.') ||
+        typeof before.title !== 'string' || before.title.includes('/') || !syncPath(before.title) ||
+        !/^"[^"\r\n]+"$/.test(before.etag) || !Number.isFinite(Number(before.fileSize)) || Number(before.fileSize) > MAX_FILE_BYTES) throw new Error('Select ordinary files up to 20 MB. Google documents and folders cannot be imported.');
+    const response = await this.request({ url: `${API}/${identifier(id)}?alt=media`, method: 'GET' });
+    const after = await get();
+    if (before.etag !== after.etag) throw new StaleWrite();
+    const content = markdown(before.title) ? response.text : response.arrayBuffer;
+    if (content === undefined || bytes(content).byteLength > MAX_FILE_BYTES) throw new Error('Missing bytes or file too large.');
+    return { name: before.title, content, etag: after.etag };
   }
   private async parent(path: string): Promise<string> {
     const parts = path.split('/'); parts.pop(); let prefix = ''; let parent = this.folderId;
@@ -97,17 +114,44 @@ export class DriveStore implements RemoteStore {
     }
     return parent;
   }
-  async create(path: string, content: string, id: string): Promise<void> {
+  async create(path: string, content: Content, id: string): Promise<void> {
     if (!syncPath(path)) throw new Error('Unsupported file path.');
     const parent = await this.parent(path); const boundary = `ds_${crypto.randomUUID()}`;
-    const metadata = { id: identifier(id), name: path.split('/').at(-1), mimeType: 'text/markdown', parents: [parent] };
+    const metadata = { id: identifier(id), name: path.split('/').at(-1), mimeType: mimeType(path), parents: [parent] };
+    const head = new TextEncoder().encode(`--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: ${mimeType(path)}\r\n\r\n`);
+    const data = bytes(content); const tail = new TextEncoder().encode(`\r\n--${boundary}--\r\n`);
+    if (data.byteLength > MAX_FILE_BYTES) throw new Error('File exceeds 20 MB.');
+    const body = new Uint8Array(head.length + data.length + tail.length);
+    body.set(head); body.set(data, head.length); body.set(tail, head.length + data.length);
     const response = await this.send({ url: 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', method: 'POST',
-      contentType: `multipart/related; boundary=${boundary}`, body: `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n--${boundary}\r\nContent-Type: text/markdown; charset=UTF-8\r\n\r\n${content}\r\n--${boundary}--\r\n` });
+      contentType: `multipart/related; boundary=${boundary}`, body: body.buffer });
     if (![200, 201, 409].includes(response.status)) throw new Error(`Upload was not confirmed (HTTP ${response.status}); its reserved ID is retained for retry.`);
   }
-  async update(file: RemoteFile, content: string, etag: string): Promise<void> {
+  async missing(id: string): Promise<'trashed' | 'unavailable' | 'outside'> {
+    const response = await this.send({ url: `${API}/${identifier(id)}?fields=id,trashed`, method: 'GET' });
+    if (response.status === 404) return 'unavailable';
+    if (response.status !== 200) throw new Error(`Could not verify missing file (HTTP ${response.status}).`);
+    return object(response).trashed === true ? 'trashed' : 'outside';
+  }
+  async trash(file: RemoteFile, etag: string): Promise<void> {
+    await this.changeMetadata(file, { labels: { trashed: true } }, etag);
+  }
+  async move(file: RemoteFile, path: string, etag: string): Promise<void> {
+    if (!syncPath(path)) throw new Error('Unsupported destination path.');
+    const oldParent = this.folders.get(file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '');
+    if (!oldParent) throw new Error('Unknown source folder.');
+    const parent = await this.parent(path);
+    const query = parent === oldParent ? '' : `&addParents=${parent}&removeParents=${oldParent}`;
+    await this.changeMetadata(file, { title: path.split('/').at(-1) }, etag, query);
+  }
+  private async changeMetadata(file: RemoteFile, body: object, etag: string, query = ''): Promise<void> {
+    if (!/^"[^"\r\n]+"$/.test(etag)) throw new Error('A strong version validator is required.');
+    await this.request({ url: `${V2}/${identifier(file.id)}?fields=id${query}`, method: 'PUT',
+      contentType: 'application/json', headers: { 'If-Match': etag }, body: JSON.stringify(body) });
+  }
+  async update(file: RemoteFile, content: Content, etag: string): Promise<void> {
     if (!/^"[^"\r\n]+"$/.test(etag)) throw new Error('A strong version validator is required.');
     await this.request({ url: `https://www.googleapis.com/upload/drive/v2/files/${identifier(file.id)}?uploadType=media&fields=id`,
-      method: 'PUT', headers: { 'If-Match': etag }, contentType: 'text/markdown; charset=UTF-8', body: content });
+      method: 'PUT', headers: { 'If-Match': etag }, contentType: mimeType(file.path), body: content });
   }
 }

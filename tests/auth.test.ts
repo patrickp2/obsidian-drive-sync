@@ -210,3 +210,12 @@ test('Drive token access refreshes expiry and refuses a revoked or stopped sessi
   f.session.stop();
   await assert.rejects(f.session.tokenForDrive(), /Finish connecting/);
 });
+test('only an initiated picker login can return authorized import selections', async () => {
+  const f = fixture(); let url = new URL(await f.session.begin());
+  assert.equal(url.searchParams.has('trigger_onepick'), false);
+  assert.equal(await f.session.complete({ state: url.searchParams.get('state')!, code: 'code', pickedFileIds: ['ignored'] }), undefined);
+  url = new URL(await f.session.begin(undefined, true));
+  assert.equal(url.searchParams.get('trigger_onepick'), 'true'); assert.equal(url.searchParams.get('allow_multiple'), 'true');
+  assert.equal(url.searchParams.get('scope'), DRIVE_SCOPE);
+  assert.deepEqual(await f.session.complete({ state: url.searchParams.get('state')!, code: 'code', pickedFileIds: ['selected'] }), ['selected']);
+});

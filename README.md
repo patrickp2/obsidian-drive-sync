@@ -4,14 +4,14 @@ An Obsidian plugin project for automatically syncing local Mac and iPhone/iPad v
 
 The Mac vault will live outside folders managed by Google Drive for desktop or other sync services. After setup, routine synchronization should happen automatically while the vault is open and the device allows execution, with visible pending work and preserved conflicts.
 
-**Status: 0.2.1 beta. Automatic Markdown sync, conflict copies, guarded Drive writes, and local device pairing are implemented. Desktop/iPhone authentication and conditional-write tests passed on both platforms. Real-iPhone pairing, edits in both directions, and a concurrent-edit conflict test passed. In-app QR scanning and the single-panel setup flow passed on the real iPhone. Attachments and deletion propagation are not enabled. Use disposable vaults only.**
+**Status: 0.3.0 development beta. Notes and attachments (20 MB per file), guarded edits, rename/move reconciliation, recoverable deletions, separate vault folders, and local device pairing are implemented. Desktop live tests passed for binary fidelity, two-folder isolation, and current/stale conditional moves and trash. The new iPhone lifecycle and Google Picker import tests are still pending. Use disposable vaults only.**
 
 Start with the [full installation guide](INSTALLATION.md). It covers BRAT on desktop and iPhone, one-time Google project setup, today's per-device sign-in, troubleshooting, and the pairing/automatic-sync flow. Installing the GitHub app is unnecessary.
 
 ## Project layout
 
 - `REQUIREMENTS.md`: requirements, architecture decisions, open questions, and acceptance criteria.
-- `INSTALLATION.md`: current installation steps and the clearly separated planned onboarding flow.
+- `INSTALLATION.md`: current installation and pairing steps.
 - `FEASIBILITY.md`: authentication/storage evidence and unresolved validation gates.
 - `DEVELOPMENT.md`: build, Google configuration, and disposable-vault test instructions.
 - `docs/`: generated static GitHub Pages callback.

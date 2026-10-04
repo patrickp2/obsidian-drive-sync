@@ -31,7 +31,7 @@ The desktop vault is `test-vaults/drive-sync-auth` (ignored by Git), running Obs
 - Drive: v3 media PATCH ignored the deliberately nonmatching precondition; v2 media PUT rejected the stale ETag with 412 and preserved content. Current ETags succeeded. Probe resources were moved to trash.
 - iPhone file API: v2 current-ETag writes passed; stale writes returned HTTP 412 and preserved newer bytes; fresh retry passed. Probe resources were moved to Drive trash.
 - Pairing: a temporary listener bound to the Mac's private network interface successfully transferred synthetic configuration through the actual encrypted request/response path. Real-iPhone external-Camera handoff, desktop approval, configuration storage, and first sync passed. In-app camera permission, live scanning, and the single-panel flow passed on the real iPhone in 0.2.1, with user confirmation of scanning and subsequent UI verification of connection and sync status.
-- Desktop sync: the current engine created the dedicated Drive folder, uploaded the synthetic README and Sync test notes, and recorded confirmed baselines. Further mobile and conflict results must be recorded after they run.
+- Desktop sync: the current engine created the dedicated Drive folder, uploaded the synthetic README and Sync test notes, and recorded confirmed baselines. The mobile and conflict results are recorded below.
 
 - Real-device edits: Mac → iPhone → Mac → iPhone passed. Pausing phone sync, independently editing both devices, and resuming preserved both branches as ordinary Markdown; the conflict copy propagated to the Mac.
 
@@ -39,4 +39,12 @@ The desktop vault is `test-vaults/drive-sync-auth` (ignored by Git), running Obs
 
 Use matching version numbers in package.json, manifest.json, and the release tag. Run checks and credential scanning before publishing. Attach `main.js`, `manifest.json`, and `styles.css` separately to the GitHub prerelease; BRAT downloads those assets. Do not overwrite older release assets. Update both devices through BRAT or copy built artifacts only into the desktop test vault.
 
-Do not mark the beta production-ready: current limits and remaining gates are in [FEASIBILITY.md](FEASIBILITY.md). Source-level tests do not establish real iOS lifecycle/network behavior. Deletions and attachments remain disabled until their separate protection paths are implemented and tested.
+Do not mark the beta production-ready: current limits and remaining gates are in [FEASIBILITY.md](FEASIBILITY.md). Source-level tests do not establish real iOS lifecycle/network behavior. Version 0.3.0 implements attachments and recoverable move/deletion paths. New phone lifecycle and Picker tests must pass before claiming those flows verified on both devices.
+
+## 0.3.0 validation
+
+`npm run check` passes 74 tests, including binary recovery under late writes, pending create/move/trash outcomes after simulated interruption, deletion-vs-edit conflicts, two separate vault states, root-bound state migration, folder rename chains, protected import copies, state-bound Picker callbacks, version-cache behavior, and 2,000-file restart reconciliation.
+
+The extended disposable-file command passed on the Mac through the real Obsidian HTTP adapter: two roots with identical paths, arbitrary binary bytes, current/stale content updates, current/stale rename plus parent move, and current/stale trash. Rejected writes returned HTTP 412. Both synthetic roots were moved to trash.
+
+Still required: repeat the expanded command on iPhone; exchange a real attachment between the test vaults; exercise note/folder rename and recoverable deletion through the Obsidian UI; interrupt actual transfers with app termination/network loss; test Google Picker with a synthetic externally created file. Google Picker was enabled with approval; billing remains unlinked. Never revoke the user's normal grants merely to force a test; use an isolated test grant or arrange a user-controlled revocation.

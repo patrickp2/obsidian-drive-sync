@@ -1,8 +1,8 @@
 {
   "name": "obsidian-drive-sync",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
-  "description": "Google Drive Markdown sync beta with guarded edits and local device pairing",
+  "description": "Google Drive vault sync beta with guarded writes and local device pairing",
   "scripts": {
     "build": "npm run typecheck && node scripts/build.mjs",
     "typecheck": "tsc --noEmit",

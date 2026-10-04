@@ -4,9 +4,9 @@ export interface ProbeRequest {
   method: 'GET' | 'POST' | 'PATCH' | 'PUT';
   headers?: Record<string, string>;
   contentType?: string;
-  body?: string;
+  body?: string | ArrayBuffer;
 }
-export interface ProbeResponse { status: number; headers: Record<string, string>; text: string }
+export interface ProbeResponse { status: number; headers: Record<string, string>; text: string; arrayBuffer?: ArrayBuffer }
 export type ProbeTransport = (request: ProbeRequest) => Promise<ProbeResponse>;
 export interface ProbeReport { folderName: string; checks: string[]; passed: boolean; cleanup: string }
 const API = 'https://www.googleapis.com/drive/v3/files';

@@ -12,8 +12,8 @@ function server(options: { ignorePrecondition?: boolean; missingEtag?: boolean; 
     assert.equal(url.origin, 'https://www.googleapis.com');
     if (request.method === 'POST') {
       if (url.searchParams.get('uploadType') === 'multipart') {
-        content = request.body!.split('Content-Type: text/markdown; charset=UTF-8\r\n\r\n')[1]!.split('\r\n--')[0]!;
-        assert.equal(JSON.parse(request.body!.split('\r\n\r\n')[1]!.split('\r\n--')[0]!).parents[0], 'created-folder');
+        content = (request.body as string).split('Content-Type: text/markdown; charset=UTF-8\r\n\r\n')[1]!.split('\r\n--')[0]!;
+        assert.equal(JSON.parse((request.body as string).split('\r\n\r\n')[1]!.split('\r\n--')[0]!).parents[0], 'created-folder');
         return respond(200, '{"id":"created-file"}');
       }
       return respond(200, '{"id":"created-folder"}');
@@ -27,7 +27,7 @@ function server(options: { ignorePrecondition?: boolean; missingEtag?: boolean; 
     if (request.body === '{"trashed":true}') return respond(options.cleanupFails ? 503 : 200, '{}');
     assert.equal(url.searchParams.get('uploadType'), 'media');
     if (!options.ignorePrecondition && request.headers?.['If-Match'] && request.headers['If-Match'] !== `"v${version}"`) return respond(412, '{}');
-    content = request.body!; version++;
+    content = request.body as string; version++;
     return respond(200, '{}');
   };
   return { send, calls };
