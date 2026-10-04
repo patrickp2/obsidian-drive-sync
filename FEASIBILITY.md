@@ -24,7 +24,7 @@ Core tests cover desktop-to-phone-to-desktop edits using two independent simulat
 
 The real desktop test vault `drive-sync-auth` created its dedicated Drive folder and uploaded `README.md` and `Sync test.md` automatically. Further real-device results belong in DEVELOPMENT.md.
 
-Version 0.3.0 adds byte-preserving attachments (20 MB/file), baseline-bound folder identity, persistent rename intent, version-guarded v2 metadata moves/trash, and local recovery copies. A 404 or move outside the configured tree never triggers local deletion. Version comparisons avoid downloads for unchanged content. Existing-file import uses explicit Google Picker selection and preserves the source; whole-folder adoption is not implemented. Empty folders are not synchronized. Use disposable vaults until broader live tests pass.
+Version 0.3.0 adds byte-preserving attachments (20 MB/file), baseline-bound folder identity, persistent rename intent, version-guarded v2 metadata moves/trash, and local recovery copies. A 404 or move outside the configured tree never triggers local deletion. Version comparisons avoid downloads for unchanged content. Version 0.4.0 selects existing folders directly and discovers externally added files using full Drive authorization. Empty folders are not synchronized. Use disposable vaults until broader live tests pass.
 
 The same v2 conditional-write probe also passed on the real iPhone in 0.2.1: baseline Unicode round trip, current-ETag write, stale-ETag HTTP 412 with newer content preserved, then successful fresh-ETag write. Its temporary resources were moved to Drive trash.
 
@@ -48,11 +48,11 @@ SecretStorage's runtime encryption-availability gate passed on the actual deskto
 
 ## Permissions, billing, and remaining gates
 
-Only `drive.file` is requested. The plugin restricts operations to the dedicated app-created root, but the Google token itself is not folder-scoped. It does not automatically authorize every file created externally inside that folder. Real cross-device visibility must be tested with each device's independent grant and the same OAuth client.
+Version 0.4.0 requests `drive` (whole-Drive access), approved by the user for automatic discovery of externally added files. The plugin operates within the configured folder; this is not a token-level security boundary. Each device needs its own grant containing the full scope. Previously saved insufficient grants require reconnection before any Drive requests. No Google Picker flow remains.
 
 The dedicated test Google project has no linked billing account. No paid compute or hosted pairing/token service was created. Recheck [Drive API billing/limits](https://developers.google.com/workspace/drive/api/guides/limits) before enabling paid services or expanding usage.
 
-Remaining gates include full desktop application restart, real-iPhone attachment/move/trash and fault tests for 0.3.0, the new Google Picker flow, live revoked-grant tests, production OAuth suitability, and real-network stress testing. Automated fault tests and a 2,000-file simulation pass; these do not establish iOS suspension behavior. A successful connection or one conditional-write test alone is not full production readiness.
+Remaining gates include full desktop application restart, real-iPhone attachment/move/trash and fault tests for 0.3.0, existing-folder selection and automatic external-file discovery, live revoked-grant tests, production OAuth suitability, and real-network stress testing. Automated fault tests and a 2,000-file simulation pass; these do not establish iOS suspension behavior. A successful connection or one conditional-write test alone is not full production readiness.
 
 ## 0.3.0 desktop lifecycle evidence (2026-10-04)
 

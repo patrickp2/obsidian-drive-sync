@@ -1,5 +1,4 @@
 import { runLifecycleProbe } from './lifecycle-probe';
-import { importFiles } from './import';
 import type { AuthCallback } from './protocol';
 import { loadState, recordRename, recordDeletion } from './state';
 import { markdown, MAX_FILE_BYTES } from './content';
@@ -10,7 +9,8 @@ import { CALLBACK_URL, PROTOCOL_ACTION, parseCallback, parseManualCallback } fro
 import { runDriveProbe, type ProbeReport, type ProbeTransport } from './drive-probe';
 import { AddDeviceModal, ConnectDeviceModal, type PairingHost } from './pairing-ui';
 import { validateInvitation, validateConfig, type Invitation } from './pairing';
-import { DriveStore } from './drive';
+import { DriveStore, folderIdentifier } from './drive';
+import { FolderModal } from './folder-ui';
 import { SyncEngine, syncPath, type SyncState, type LocalStore } from './sync';
 
 interface Settings {
@@ -152,6 +152,23 @@ export default class DriveSyncPlugin extends Plugin {
     await new DriveStore(this.driveTransport, this.settings.folderId).verifyRoot();
     this.settings.folderPending = false; this.settings.syncEnabled = true; await this.saveSettings(); await this.syncNow();
   }
+  chooseSyncFolder(): void {
+    new FolderModal(this.app, {
+      children: id => DriveStore.childFolders(this.driveTransport, id),
+      preview: async value => {
+        const id = folderIdentifier(value);
+        const folder = await DriveStore.folder(this.driveTransport, id);
+        return { folder, files: (await new DriveStore(this.driveTransport, id).list()).length };
+      },
+      connect: async id => {
+        if (this.settings.folderId && this.settings.folderId !== id) throw new Error('This vault already has a Drive folder. Use a separate local vault for another folder.');
+        await new DriveStore(this.driveTransport, id).list();
+        this.settings.syncState = loadState(this.settings.syncState, id);
+        this.settings.folderId = id; this.settings.folderPending = false; this.settings.syncEnabled = true;
+        await this.saveSettings(); await this.syncNow();
+      }
+    }).open();
+  }
   async setSyncEnabled(enabled: boolean): Promise<void> {
     this.settings.syncEnabled = enabled;
     if (!enabled) this.engine?.stop();
@@ -234,7 +251,7 @@ export default class DriveSyncPlugin extends Plugin {
   pairingHost(): PairingHost {
     return {
       config: () => {
-        if (!this.settings.folderId || this.settings.folderPending) throw new Error('Create the desktop sync folder before adding a device.');
+        if (!this.settings.folderId || this.settings.folderPending) throw new Error('Choose the desktop sync folder before adding a device.');
         return validateConfig({ clientId: this.settings.clientId, clientSecret: secureStore(this.app).get(this.settings.clientSecretName), folderId: this.settings.folderId, vaultName: this.app.vault.getName() });
       },
       accept: async config => {
@@ -264,21 +281,9 @@ export default class DriveSyncPlugin extends Plugin {
     if (invitation) this.pairingModal.useInvitation(invitation);
   }
   async completeSignIn(response: AuthCallback): Promise<void> {
-    const selected = await this.auth.complete(response);
-    if (selected?.length) {
-      if (!this.settings.folderId) throw new Error('Create a sync folder before importing.');
-      const drive = new DriveStore(this.driveTransport, this.settings.folderId);
-      const contained = new Set((await drive.list()).map(file => file.id));
-      const imported = await importFiles(selected, contained, id => drive.readSelected(id), this.localStore());
-      new Notice(`Drive selection complete. ${imported.length} files copied; selected files already in your sync folder are now accessible.`);
-    }
+    await this.auth.complete(response);
     this.retryAt = 0;
     await this.syncNow();
-  }
-  async selectDriveFiles(): Promise<void> {
-    if (!this.settings.syncEnabled) throw new Error('Resume sync before importing files.');
-    const url = await this.auth.begin(undefined, true);
-    if (Platform.isMobileApp) new BrowserSignInModal(this.app, url).open(); else window.open(url, '_blank');
   }
   async connect(verifyPkce?: 'wrong' | 'missing'): Promise<void> {
     const url = await this.auth.begin(verifyPkce);
@@ -361,10 +366,10 @@ class DriveSyncSettings extends PluginSettingTab {
       .addButton(b => b.setButtonText('Connect to existing device').setCta().onClick(() => this.plugin.showPairing()));
     const connection = new Setting(el).setName('Google connection').setDesc(this.plugin.auth.state.message)
       .addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())));
-    if ((!this.plugin.settings.folderId || this.plugin.settings.folderPending) && Platform.isDesktopApp) new Setting(el).setName('Sync folder').setDesc('Create a dedicated folder in Google Drive and begin syncing this vault’s notes and attachments.')
-      .addButton(b => b.setButtonText('Create sync folder').setCta().onClick(() => void this.plugin.run(async () => { await this.plugin.createSyncFolder(); this.display(); })));
+    if ((!this.plugin.settings.folderId || this.plugin.settings.folderPending) && Platform.isDesktopApp) new Setting(el).setName('Sync folder').setDesc('Choose an existing Google Drive folder or create a new one for this vault. Files added through Drive are included automatically.')
+      .addButton(b => b.setButtonText('Choose existing folder').setCta().onClick(() => this.plugin.chooseSyncFolder()))
+      .addButton(b => b.setButtonText('Create sync folder').onClick(() => void this.plugin.run(async () => { await this.plugin.createSyncFolder(); this.display(); })));
     if (this.plugin.settings.folderId && !this.plugin.settings.folderPending) {
-      new Setting(el).setName('Import or authorize existing files').setDesc('Select files in Google. Files outside this sync folder are copied into Imported from Drive; originals stay unchanged. Select externally added files inside the sync folder to make them visible. Folder-wide access is not granted.').addButton(b => b.setButtonText('Choose Drive files').onClick(() => void this.plugin.run(() => this.plugin.selectDriveFiles())));
       new Setting(el).setName(`Google Drive folder · ${this.app.vault.getName()}`).addButton(b => b.setButtonText('Open folder in Drive').onClick(() => window.open(`https://drive.google.com/drive/folders/${this.plugin.settings.folderId}`, '_blank')));
       new Setting(el).setName('Automatic sync').setDesc('Runs after saved edits, on resume, and every 30 seconds while Obsidian is open.')
         .addToggle(t => t.setValue(this.plugin.settings.syncEnabled).onChange(value => void this.plugin.run(() => this.plugin.setSyncEnabled(value))));
@@ -389,7 +394,7 @@ class DriveSyncSettings extends PluginSettingTab {
         }));
     } catch { config.createEl('p', { text: 'Encrypted secret storage is unavailable. Update Obsidian before connecting.' }); }
     new Setting(config).setName('Redirect URI').setDesc(CALLBACK_URL);
-    config.createEl('p', { text: 'Scope: drive.file — app-created or explicitly authorized files. Use Choose Drive files to grant access to individual existing files. Enable Google Picker API in your project first. External Google projects in Testing commonly require sign-in again after seven days.' });
+    config.createEl('p', { text: 'Google grants access to all Drive files. This plugin synchronizes only the folder selected for this vault; that restriction is enforced by the plugin, not the token. External Google projects in Testing commonly require sign-in again after seven days.' });
   }
 }
 class DriveProbeModal extends Modal {

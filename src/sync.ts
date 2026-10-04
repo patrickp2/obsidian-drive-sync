@@ -9,6 +9,7 @@ export interface SyncState {
   pendingCreates: Record<string, string>;
   deleted: Record<string, boolean>;
   renames?: Record<string, string>;
+  moveTargets?: Record<string, string>;
   folderId?: string;
 }
 export const emptySyncState = (): SyncState => ({ format: 1, baseline: {}, pendingCreates: {}, deleted: {} });
@@ -49,23 +50,33 @@ export class SyncEngine {
     const blocked = new Set<string>();
     const byId = new Map(remotes.map(f => [f.id, f]));
     const journal = this.state.renames ??= {};
+    const sent = this.state.moveTargets ??= {};
     for (const [old, base] of Object.entries(this.state.baseline)) {
       this.alive();
       const remote = byId.get(base.id);
       const intended = journal[old];
       const target = intended ?? (remote?.path !== old ? remote?.path : undefined);
-      if (!target || target === old) continue;
+      if (!target) continue;
+      if (target === old && remote?.path === old) {
+        if (intended) { delete journal[old]; delete sent[old]; await this.save(); }
+        continue;
+      }
       blocked.add(old); blocked.add(target);
+      if (remote) blocked.add(remote.path);
       const pending = (why: string) => result.pending.push(`${old} → ${target}: ${why}`);
       if (!remote) { pending('remote file unavailable; move kept for review.'); continue; }
-      if (intended && remote.path !== old && remote.path !== target) { pending('both devices chose different destinations.'); continue; }
+      if (intended && remote.path !== old && remote.path !== target && sent[old] !== remote.path) { pending('both devices chose different destinations.'); continue; }
       if (remotes.some(f => f.path === target && f.id !== base.id) || (this.state.baseline[target] && this.state.baseline[target]!.id !== base.id)) {
         pending('destination already exists; neither file overwritten.'); continue;
       }
-      if (remote.path === old && intended) {
+      if (remote.path !== target && intended) {
         if (!this.remote.move) { pending('remote moves unavailable.'); continue; }
         const snapshot = await this.remote.read(remote);
         this.alive();
+        if (journal[old] !== intended) { pending('destination changed locally; checking again.'); continue; }
+        // Persist the attempted destination before sending. A second rename can
+        // arrive while this request is in flight, including after a lost reply.
+        sent[old] = target; await this.save(); this.alive();
         try { await this.remote.move(remote, target, snapshot.etag); }
         catch (error) { if (error instanceof StaleWrite) { pending('remote changed; retrying.'); continue; } throw error; }
         // Do not transfer the baseline yet. A new complete listing confirms an
@@ -73,6 +84,7 @@ export class SyncEngine {
         pending('move sent; verifying on the next check.'); continue;
       }
       const oldContent = await this.local.read(old);
+      if (journal[old] !== intended) { pending('destination changed locally; checking again.'); continue; }
       if (oldContent !== null) {
         if (await this.local.read(target) !== null || !await this.local.move?.(old, target, oldContent)) {
           pending('local destination occupied or source changed.'); continue;
@@ -84,6 +96,7 @@ export class SyncEngine {
       }
       this.state.baseline[target] = base;
       delete this.state.baseline[old]; delete this.state.deleted[old]; delete journal[old];
+      delete sent[old];
       if (this.state.pendingCreates[old]) { this.state.pendingCreates[target] = this.state.pendingCreates[old]!; delete this.state.pendingCreates[old]; }
       await this.save(); blocked.delete(target);
     }
@@ -118,6 +131,10 @@ export class SyncEngine {
       if (blocked.has(path)) continue;
       const local = await this.local.read(path);
       const remote = byPath.get(path);
+      // Rename events can arrive after the initial listing/reconciliation.
+      // Never download an intermediate destination as an unrelated new file.
+      if (Object.entries(this.state.renames ?? {}).some(([source, target]) =>
+        target === path || (this.state.baseline[source] && (source === path || this.state.baseline[source]!.id === remote?.id)))) continue;
       const base = this.state.baseline[path];
       if (!remote) {
         if (base) {

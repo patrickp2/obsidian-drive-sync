@@ -4,6 +4,17 @@ import type { ProbeRequest, ProbeResponse, ProbeTransport } from './drive-probe'
 const API = 'https://www.googleapis.com/drive/v3/files';
 const V2 = 'https://www.googleapis.com/drive/v2/files';
 const FOLDER = 'application/vnd.google-apps.folder';
+export interface DriveFolder { id: string; name: string }
+export function folderIdentifier(value: string): string {
+  let id = value.trim();
+  if (id.startsWith('https://')) {
+    const url = new URL(id);
+    if (url.hostname !== 'drive.google.com' || url.username || url.password || url.port) throw new Error('Use a Google Drive folder link or folder ID.');
+    id = url.pathname.match(/^\/(?:drive\/(?:u\/\d+\/)?)?folders\/([A-Za-z0-9_-]+)\/?$/)?.[1] ?? '';
+  }
+  if (id === 'root') throw new Error('Choose a folder inside My Drive, not the whole Drive.');
+  return identifier(id);
+}
 function object(response: ProbeResponse): Record<string, any> {
   try { const data = JSON.parse(response.text); if (!data || typeof data !== 'object') throw new Error(); return data; }
   catch { throw new Error('Invalid response from Google Drive.'); }
@@ -26,6 +37,33 @@ export class DriveStore implements RemoteStore {
     if (response.status !== 200) throw new Error(`Could not reserve a file ID (HTTP ${response.status}).`);
     return identifier(object(response).ids?.[0]);
   }
+  static async folder(send: ProbeTransport, id: string): Promise<DriveFolder> {
+    const response = await send({ url: `${API}/${identifier(id)}?fields=id,name,mimeType,trashed,capabilities(canAddChildren)`, method: 'GET' });
+    if (response.status !== 200) throw new Error(`Could not open the Drive folder (HTTP ${response.status}).`);
+    const data = object(response);
+    if (data.mimeType !== FOLDER || data.trashed || data.capabilities?.canAddChildren !== true) throw new Error('Choose an available Drive folder where you can add files.');
+    return { id: identifier(data.id), name: typeof data.name === 'string' ? data.name : id };
+  }
+  static async childFolders(send: ProbeTransport, parent = 'root'): Promise<DriveFolder[]> {
+    identifier(parent);
+    const result: DriveFolder[] = []; let page = ''; const seen = new Set<string>();
+    do {
+      const params = new URLSearchParams({ q: `'${parent}' in parents and trashed = false and mimeType = '${FOLDER}'`, fields: 'files(id,name),nextPageToken,incompleteSearch', pageSize: '1000', spaces: 'drive', orderBy: 'name' });
+      if (page) params.set('pageToken', page);
+      const response = await send({ url: `${API}?${params}`, method: 'GET' });
+      if (response.status !== 200) throw new Error(`Could not list Drive folders (HTTP ${response.status}).`);
+      const data = object(response);
+      if (data.incompleteSearch || !Array.isArray(data.files)) throw new Error('Drive returned an incomplete folder listing.');
+      for (const file of data.files) {
+        if (typeof file.name !== 'string') throw new Error('Invalid Drive folder listing.');
+        result.push({ id: identifier(file.id), name: file.name });
+      }
+      page = data.nextPageToken ?? '';
+      if (typeof page !== 'string' || (page && seen.has(page))) throw new Error('Invalid Drive pagination.');
+      seen.add(page);
+    } while (page);
+    return result;
+  }
   reserveId(): Promise<string> { return DriveStore.reserveId(this.send); }
   private async request(request: ProbeRequest): Promise<ProbeResponse> {
     const response = await this.send(request);
@@ -34,8 +72,7 @@ export class DriveStore implements RemoteStore {
     return response;
   }
   async verifyRoot(): Promise<void> {
-    const result = object(await this.request({ url: `${API}/${this.folderId}?fields=id,mimeType,trashed,appProperties`, method: 'GET' }));
-    if (result.mimeType !== FOLDER || result.trashed || result.appProperties?.driveSyncRoot !== '1') throw new Error('The selected sync folder is unavailable or was not created by Drive Sync.');
+    await DriveStore.folder(this.send, this.folderId);
   }
   async list(): Promise<RemoteFile[]> {
     await this.verifyRoot();
@@ -85,20 +122,6 @@ export class DriveStore implements RemoteStore {
     const after = await this.metadata(file);
     if (before.etag !== after.etag) throw new StaleWrite();
     return { content, etag: after.etag, version: after.version };
-  }
-  /** Only called for IDs returned by an explicitly initiated Google Picker flow. */
-  async readSelected(id: string): Promise<RemoteRead & { name: string }> {
-    const get = async () => object(await this.request({ url: `${V2}/${identifier(id)}?fields=id,etag,title,mimeType,labels,fileSize`, method: 'GET' }));
-    const before = await get();
-    if (before.labels?.trashed || String(before.mimeType).startsWith('application/vnd.google-apps.') ||
-        typeof before.title !== 'string' || before.title.includes('/') || !syncPath(before.title) ||
-        !/^"[^"\r\n]+"$/.test(before.etag) || !Number.isFinite(Number(before.fileSize)) || Number(before.fileSize) > MAX_FILE_BYTES) throw new Error('Select ordinary files up to 20 MB. Google documents and folders cannot be imported.');
-    const response = await this.request({ url: `${API}/${identifier(id)}?alt=media`, method: 'GET' });
-    const after = await get();
-    if (before.etag !== after.etag) throw new StaleWrite();
-    const content = markdown(before.title) ? response.text : response.arrayBuffer;
-    if (content === undefined || bytes(content).byteLength > MAX_FILE_BYTES) throw new Error('Missing bytes or file too large.');
-    return { name: before.title, content, etag: after.etag };
   }
   private async parent(path: string): Promise<string> {
     const parts = path.split('/'); parts.pop(); let prefix = ''; let parent = this.folderId;

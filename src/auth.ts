@@ -10,7 +10,7 @@ export interface HttpResponse { status: number; json: unknown }
 export type Transport = (url: string, body: URLSearchParams) => Promise<HttpResponse>;
 export type AuthStatus = 'disconnected' | 'awaiting-browser' | 'connecting' | 'connected' | 'refreshing' | 'retrying' | 'test-complete' | 'needs-reconnect';
 export interface AuthState { status: AuthStatus; message: string }
-interface PendingLogin { state: string; verifier: string; createdAt: number; client: ClientConfig; verifyPkce?: 'wrong' | 'missing'; picker?: boolean }
+interface PendingLogin { state: string; verifier: string; createdAt: number; client: ClientConfig; verifyPkce?: 'wrong' | 'missing' }
 interface Grant { clientId: string; refreshToken: string; scope: string }
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token';
@@ -73,10 +73,10 @@ export class AuthSession {
     try {
       if (this.grant()) await this.refresh();
     } catch {
-      if (this.state.status !== 'retrying') this.publish('needs-reconnect', 'Could not restore Google access. Check your connection settings.');
+      if (!['retrying', 'needs-reconnect'].includes(this.state.status)) this.publish('needs-reconnect', 'Could not restore Google access. Check your connection settings.');
     }
   }
-  async begin(verifyPkce?: 'wrong' | 'missing', picker = false): Promise<string> {
+  async begin(verifyPkce?: 'wrong' | 'missing'): Promise<string> {
     if (this.stopped || this.exchangeInFlight || this.refreshInFlight) throw new Error('Wait for the current connection request to finish.');
     const client = this.client();
     const generation = ++this.generation;
@@ -86,15 +86,14 @@ export class AuthSession {
     const verifier = randomValue();
     const challenge = await pkceChallenge(verifier);
     if (this.stopped || generation !== this.generation) throw new Error('Sign-in was cancelled.');
-    this.pending = { state, verifier, createdAt: this.now(), client, verifyPkce, picker };
+    this.pending = { state, verifier, createdAt: this.now(), client, verifyPkce };
     const params = new URLSearchParams({ client_id: client.clientId, redirect_uri: CALLBACK_URL,
       response_type: 'code', scope: DRIVE_SCOPE, state, code_challenge: challenge,
       code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent' });
-    if (picker) { params.set('trigger_onepick', 'true'); params.set('allow_multiple', 'true'); }
     this.publish('awaiting-browser', 'Finish connecting in your browser.');
     return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   }
-  async complete(response: AuthCallback): Promise<string[] | undefined> {
+  async complete(response: AuthCallback): Promise<void> {
     const pending = this.pending;
     if (this.stopped || !pending || response.state !== pending.state) {
       throw new Error('This sign-in does not match a pending request on this device.');
@@ -158,7 +157,7 @@ export class AuthSession {
       if (this.stopped || generation !== this.generation) return;
       // Never carry a previous account's refresh grant into a new login.
       this.accept(result, current.clientId);
-      return pending.picker ? response.pickedFileIds ?? [] : undefined;
+
     } catch {
       const message = pending.verifyPkce ? `PKCE verification failed or was inconclusive at: ${pkceStage}. Reconnect before further testing.` : 'Could not complete sign-in. Start again.';
       if (!this.stopped && generation === this.generation) this.publish('needs-reconnect', message);
@@ -195,6 +194,11 @@ export class AuthSession {
     const grant = this.grant();
     const client = this.client();
     if (!grant || grant.clientId !== client.clientId) throw new Error('Connect Google on this device first.');
+    if (!grant.scope.split(' ').includes(DRIVE_SCOPE)) {
+      this.accessToken = null;
+      this.publish('needs-reconnect', 'Reconnect Google to allow automatic syncing of files added in Drive.');
+      throw new Error(this.state.message);
+    }
     const generation = this.generation;
     this.publish('refreshing', 'Refreshing Google access.');
     try {

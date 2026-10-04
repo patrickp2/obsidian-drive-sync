@@ -2,13 +2,13 @@
 
 Drive Sync uses the Google Drive API on both desktop and iPhone. Each device has its own local Obsidian vault, and Drive stores ordinary Markdown files in one dedicated folder. No hosted token broker or pairing service is required.
 
-**0.3.0 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
+**0.4.0 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
 
 ## Setup at a glance
 
 1. Desktop: install BRAT, then install Drive Sync from GitHub.
 2. Desktop: create your own Google OAuth client once, configure it, and sign in.
-3. Desktop: choose **Create sync folder**.
+3. Desktop: choose **Choose existing folder** or **Create sync folder**.
 4. iPhone: install BRAT and the same Drive Sync release.
 5. Desktop: choose **Add device**. Scan the invitation on the phone and approve it on the Mac.
 6. iPhone: sign in to Google. The paired folder then syncs automatically while Obsidian is open.
@@ -26,7 +26,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
    https://github.com/patrickp2/obsidian-drive-sync
    ```
 
-5. Select the published **0.3.0** prerelease and enable Drive Sync. If BRAT does not list it immediately, refresh its release list. This setup requires 0.3.0 or newer.
+5. Select the published **0.4.0** prerelease and enable Drive Sync. If BRAT does not list it immediately, refresh its release list. This setup requires 0.4.0 or newer.
 
 A GitHub account or personal access token is normally unnecessary for this public repository. If GitHub rate-limits BRAT, wait and retry. Plugins are installed per vault and per device. See [BRAT's guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md).
 
@@ -35,9 +35,9 @@ A GitHub account or personal access token is normally unnecessary for this publi
 The current implementation uses your own Google **Web application** OAuth client with PKCE. Desktop and iPhone sign-in work in testing, but production suitability of this client type is still under review. This setup does not make a client secret embedded on a device confidential.
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) and create a dedicated project. Leave billing unlinked.
-2. In **APIs & Services → Library**, enable **Google Drive API**. Also enable **Google Picker API** to import or authorize existing files. No billing account is needed for this setup.
+2. In **APIs & Services → Library**, enable **Google Drive API**. No billing account is needed for this setup.
 3. Configure **Google Auth Platform** branding and audience. For qualifying Workspace projects, **Internal** restricts sign-in to the organization. Personal Gmail users need **External**, with their account added as a test user while testing.
-4. Use the scope `https://www.googleapis.com/auth/drive.file` in the consent/data-access configuration. Do not add whole-Drive access.
+4. Use the scope `https://www.googleapis.com/auth/drive` in the consent/data-access configuration. This grants access to all Drive files; the plugin limits synchronization to the folder you select.
 5. Create a **Web application** OAuth client. Add this exact **Authorized redirect URI**, including its trailing slash:
 
    ```text
@@ -47,17 +47,18 @@ The current implementation uses your own Google **Web application** OAuth client
 6. Leave Authorized JavaScript origins empty. No API key or service account is needed.
 7. In **Obsidian → Settings → Drive Sync → Google project configuration**, enter the client ID. Under **Client secret**, create/select an Obsidian Keychain entry. Use `drive-sync-google-client` as its **ID/name**, and put the Google secret in its **Secret** field. The 64-character limit applies to the ID/name.
 8. Choose **Sign in to Google**, complete consent, and select **Return to Obsidian** on the callback page.
-9. Choose **Create sync folder**. The plugin creates `Obsidian Drive Sync - <vault name>` in My Drive and starts syncing the vault's notes and attachments. **Open folder in Drive** opens that exact folder.
+9. Choose **Choose existing folder**, browse to a folder (or open its Drive link), and confirm **Connect this folder**. Alternatively, **Create sync folder** creates `Obsidian Drive Sync - <vault name>` in My Drive and starts syncing the vault's notes and attachments. **Open folder in Drive** opens that exact folder.
 
 External projects left in Testing commonly issue seven-day Drive refresh grants. A lasting installation needs an appropriate publishing/audience configuration and any applicable verification. See [Google's OAuth documentation](https://developers.google.com/identity/protocols/oauth2/web-server).
 
-`drive.file` permits app-created or explicitly authorized files; it is not a folder-scoped token. The plugin separately limits its operations to the configured folder. Use **Choose Drive files** to explicitly authorize existing files; a folder does not automatically authorize every descendant. See [Google's scope guidance](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
+The Google token can access all Drive files. Folder restrictions are enforced in the plugin, not by Google. This permission enables automatic discovery of existing files and files added through Drive. Tokens stay in encrypted Obsidian secret storage on each device and are never included in the repository or synced vault files. A stolen token could nevertheless access files outside the selected folder. See [Google's scope guidance](https://developers.google.com/workspace/drive/api/guides/api-specific-auth).
+
 
 ## Install and pair iPhone
 
 1. Install/update Obsidian. Create an empty local test vault with **Store in iCloud** off.
 2. Install and enable BRAT through **Settings → Community plugins**.
-3. In BRAT, add the same repository and select the same **0.3.0** release. Enable Drive Sync.
+3. In BRAT, add the same repository and select the same **0.4.0** release. Enable Drive Sync.
 4. Put the Mac and phone on the same private local network. Keep desktop Obsidian open.
 5. On desktop, open **Settings → Drive Sync → Add device**. A three-minute QR invitation appears.
 6. On the phone, choose **Connect to existing device → Scan QR**. Scan the desktop QR, then choose **Approve device** on the Mac. Check the displayed desktop and local vault names, then tap **Connect this vault**. All phone steps stay in one panel. **Take QR photo** is available if the live camera is unsupported; a one-time invitation paste is under the alternative options. No individual client fields need to be copied.
@@ -77,20 +78,18 @@ If both devices changed a note, both edits are preserved using an ordinary `name
 
 ## More than one vault
 
-Use a **different Drive folder for each logical vault**, for example Work and Personal. Install the plugin in each desktop vault, reuse your Google project/client configuration, sign in, and create that vault's folder. On iPhone, create a corresponding local vault, install BRAT and Drive Sync there, and pair it with the matching desktop vault. The pairing panel displays both vault names before connecting.
+Use a **different Drive folder for each logical vault**, for example Work and Personal. Install the plugin in each desktop vault, reuse your Google project/client configuration, sign in, and choose or create that vault's folder. On iPhone, create a corresponding local vault, install BRAT and Drive Sync there, and pair it with the matching desktop vault. The pairing panel displays both vault names before connecting.
 
 Each vault has its own folder ID, baseline, pending changes, and device grant. Do not clone plugin `data.json` between vaults or point unrelated vaults at the same folder. Two vaults connected to the same folder intentionally synchronize the same files. Obsidian only runs plugins for open vaults; closed mobile vaults catch up when opened.
 
 ## Existing files in Google Drive
 
-After creating/pairing the sync folder, choose **Settings → Drive Sync → Choose Drive files**. Google's picker requests individual files using the existing `drive.file` permission. Select ordinary Markdown, PDFs, images, or other files, complete Google's flow, and return to the initiating Obsidian vault.
+Choose an existing folder during desktop setup. Its ordinary files and subfolders are synchronized directly; the plugin does not make an import copy elsewhere. Use a dedicated folder for each logical vault, and pair mobile to that same folder.
 
-- Selected files already inside this vault's Drive tree become visible to normal synchronization.
-- Files outside that tree are copied to `Imported from Drive/<source ID>/<filename>` in the local vault, then uploaded as ordinary files to this vault's Drive folder. Originals remain unchanged. Repeated imports do not overwrite edited local copies.
-- Select files individually, including externally added files. Folders and Google-native Docs/Sheets/Slides are not imported. Selecting a folder is not a recursive permission grant.
-- This is a copy/import workflow, not an ongoing sync connection to the original external file. For a whole existing vault, copying its downloaded files into the local Obsidian vault is another option; the plugin creates the app-authorized Drive copies.
+Files manually uploaded or moved into that Drive folder are discovered on the next successful check on each device. You can also add files to the local Obsidian vault. Existing files with different contents on the two sides are preserved as conflict copies, rather than using timestamps to choose a winner. A device must be online with Obsidian open to complete its check.
 
-The native picker uses the existing browser callback and does not need a new API key or a hosted backend. See [Google's desktop/mobile Picker guide](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker).
+Google-native Docs/Sheets/Slides, shortcuts, hidden paths, and Obsidian configuration are excluded. The folder browser starts in My Drive; shared-drive workflows have not been validated. Google Picker API and an API key are not required.
+
 
 ## Recovery and current limits
 
@@ -108,7 +107,7 @@ You can keep Drive for desktop for unrelated files. It may also show the plugin'
 
 ## Updates and troubleshooting
 
-Update Drive Sync through BRAT on **each** device. A pinned version stays pinned until you select a newer release. Ordinary updates retain local settings and credentials; updating does not pair devices. Reopen Obsidian if the interface has not refreshed.
+Update Drive Sync through BRAT on **each** device. A pinned version stays pinned until you select a newer release. Updates retain local settings and credentials; updating does not pair devices. If the plugin displays **Reconnect Google**, sign in on each device to grant the current Drive permission before resuming sync. Reopen Obsidian if the interface has not refreshed.
 
 | Symptom | Action |
 | --- | --- |
@@ -120,7 +119,7 @@ Update Drive Sync through BRAT on **each** device. A pinned version stays pinned
 | Google rejects the account | Check the project's audience and test-user list. |
 | Pairing expires or cannot connect | Use the same network, keep Add device open, check local-network permission, and create a fresh invitation. |
 | Sync incomplete / duplicate name / moved file | Open status details. Existing content is preserved; resolve the reported issue before retrying. |
-| Connected but no sync folder | Create the folder on desktop, then pair the phone to it. Google sign-in alone does not select a folder. |
+| Connected but no sync folder | Choose or create the folder on desktop, then pair the phone to it. Google sign-in alone does not select a folder. |
 | Access expires after about a week | Check whether your Google project is External and still in Testing. |
 
 Disconnect attempts Google grant revocation and can require other devices using the project to reconnect. Credentials live in each device's [Obsidian SecretStorage](https://docs.obsidian.md/plugins/guides/secret-storage); they are not synchronized through vault files.

@@ -1,6 +1,7 @@
 import { equalContent, type Content } from '../src/content';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { recordRename } from '../src/state';
 import { SyncEngine, StaleWrite, emptySyncState, type LocalStore, type RemoteStore, type RemoteFile } from '../src/sync';
 function fixture() {
   const files = new Map<string, { id: string; content: Content; version: number }>();
@@ -149,6 +150,32 @@ test('unknown rename outcome is recovered by file ID after restart', async () =>
   const move = f.remote.move!; f.remote.move = async (...args) => { await move(...args); throw new Error('lost response'); };
   await assert.rejects(a.engine.run()); await a.restart().run();
   assert.equal(f.files.size, 1); assert.equal(a.state.baseline['old.md'], undefined); assert.ok(a.state.baseline['new.md']);
+});
+for (const destination of ['final.md', 'old.md']) test(`rename during an uncertain move converges to ${destination} without duplicates`, async () => {
+  const f = fixture(), a = f.device(), b = f.device();
+  a.notes.set('old.md', 'A'); await a.engine.run(); await b.engine.run();
+  const id = f.files.get('old.md')!.id;
+  a.notes.delete('old.md'); a.notes.set('middle.md', 'A'); recordRename(a.state, 'old.md', 'middle.md');
+  const move = f.remote.move!;
+  f.remote.move = async (...args) => {
+    await move(...args);
+    a.notes.delete('middle.md'); a.notes.set(destination, 'A'); recordRename(a.state, 'middle.md', destination);
+    throw new Error('lost reply');
+  };
+  await assert.rejects(a.engine.run()); f.remote.move = move;
+  await a.restart().run();
+  assert.equal(a.notes.has('middle.md'), false);
+  await a.restart().run(); await b.engine.run();
+  assert.deepEqual([...f.files.keys()], [destination]); assert.equal(f.files.get(destination)!.id, id);
+  assert.deepEqual([...a.notes.keys()], [destination]); assert.deepEqual([...b.notes.keys()], [destination]);
+  assert.deepEqual(Object.keys(a.state.baseline), [destination]);
+});
+test('competing rename from another device never downloads a duplicate identity', async () => {
+  const f = fixture(), a = f.device(); a.notes.set('old.md', 'A'); await a.engine.run();
+  const file = f.files.get('old.md')!; f.files.delete('old.md'); f.files.set('theirs.md', file);
+  a.notes.delete('old.md'); a.notes.set('mine.md', 'A'); recordRename(a.state, 'old.md', 'mine.md');
+  const result = await a.engine.run(); assert.equal(result.pending.length, 1);
+  assert.deepEqual([...a.notes.keys()], ['mine.md']); assert.deepEqual(Object.keys(a.state.baseline), ['old.md']);
 });
 test('rename collision preserves both files and blocks content writes to either path', async () => {
   const f = fixture(), a = f.device(); a.notes.set('old.md', 'A'); a.notes.set('new.md', 'B'); await a.engine.run();

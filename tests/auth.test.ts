@@ -33,6 +33,8 @@ test('authorization keeps the verifier and client secret out of the browser URL'
   assert.equal(url.origin, 'https://accounts.google.com');
   assert.equal(url.searchParams.get('redirect_uri'), CALLBACK_URL);
   assert.equal(url.searchParams.get('scope'), DRIVE_SCOPE);
+  assert.equal(DRIVE_SCOPE, 'https://www.googleapis.com/auth/drive');
+  assert.equal(url.searchParams.has('trigger_onepick'), false);
   assert.equal(url.searchParams.get('code_challenge_method'), 'S256');
   assert.equal(url.searchParams.has('client_secret'), false);
   assert.equal(url.searchParams.has('code_verifier'), false);
@@ -40,6 +42,15 @@ test('authorization keeps the verifier and client secret out of the browser URL'
   assert.equal(await pkceChallenge(verifier), url.searchParams.get('code_challenge'));
   assert.equal(f.session.state.status, 'connected');
   assert.equal(f.values.get('grant')!.includes('synthetic-access-token'), false);
+});
+test('an insufficient stored scope requires reconnection without using its token', async () => {
+  const f = fixture();
+  f.values.set('grant', JSON.stringify({ clientId: client.clientId, refreshToken: 'synthetic-limited-grant', scope: 'https://www.googleapis.com/auth/drive.file' }));
+  await f.session.restore();
+  assert.equal(f.session.state.status, 'needs-reconnect');
+  await assert.rejects(f.session.tokenForDrive(), /Reconnect/);
+  assert.equal(f.calls.length, 0);
+  await authorize(f); assert.equal(await f.session.tokenForDrive(), 'synthetic-access-token');
 });
 test('incorrect, expired, and reused state never trigger token exchange', async () => {
   const f = fixture(); const url = new URL(await f.session.begin());
@@ -209,13 +220,4 @@ test('Drive token access refreshes expiry and refuses a revoked or stopped sessi
   await assert.rejects(f.session.tokenForDrive(), /working Google connection/);
   f.session.stop();
   await assert.rejects(f.session.tokenForDrive(), /Finish connecting/);
-});
-test('only an initiated picker login can return authorized import selections', async () => {
-  const f = fixture(); let url = new URL(await f.session.begin());
-  assert.equal(url.searchParams.has('trigger_onepick'), false);
-  assert.equal(await f.session.complete({ state: url.searchParams.get('state')!, code: 'code', pickedFileIds: ['ignored'] }), undefined);
-  url = new URL(await f.session.begin(undefined, true));
-  assert.equal(url.searchParams.get('trigger_onepick'), 'true'); assert.equal(url.searchParams.get('allow_multiple'), 'true');
-  assert.equal(url.searchParams.get('scope'), DRIVE_SCOPE);
-  assert.deepEqual(await f.session.complete({ state: url.searchParams.get('state')!, code: 'code', pickedFileIds: ['selected'] }), ['selected']);
 });

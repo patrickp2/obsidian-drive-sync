@@ -39,7 +39,7 @@ Choose the narrowest Drive scope that supports the actual workflow. `drive.file`
 
 ## Initial folder and permission boundary
 
-Start with one dedicated folder created by the plugin, and use the same user-owned OAuth client on both devices. Request only `drive.file`; do not expand to whole-Drive access to simplify implementation. Prove cross-device visibility with disposable files. The plugin restricts its operations to the configured folder, while Google restricts the token to app-created/explicitly authorized files. These are different boundaries: the token is not a folder-scoped credential and can access other files already authorized to this app. Existing-folder import requires a separately validated per-file selection flow.
+Use the user's own OAuth client on both devices and the full `https://www.googleapis.com/auth/drive` permission, as approved for seamless discovery of files created outside the plugin. Let the user choose an existing folder or create a new one. Enforce the selected tree in plugin code and clearly disclose that the token itself can access the whole Drive. Each logical vault uses a separate folder and local sync state. No hosted service or Google Picker authorization step is required.
 
 ## Overwrite protection to validate before routine uploads
 
@@ -117,4 +117,4 @@ Prior source inspection of Tether v1.0.16 at commit `28dd18632b3d54602143d1ee915
 
 ## Current state
 
-Version 0.3.0 implements notes/attachments up to 20 MB, local device pairing with vault confirmation, ordinary Drive files, guarded content updates, identity-preserving moves, recoverable deletions, retry backoff, version-based download avoidance, and explicit per-file Google Picker import. It retains separate per-vault state and device credentials. Desktop and iPhone pairing, Markdown edits, conflicts, and v2 conditional content writes passed in 0.2.1. New desktop 0.3.0 live binary/isolation/move/trash tests passed. New phone lifecycle and Picker checks remain pending. FEASIBILITY.md and DEVELOPMENT.md distinguish automated checks, live evidence, and remaining gates.
+Version 0.4.0 implements notes/attachments up to 20 MB, local device pairing with vault confirmation, ordinary Drive files, guarded content updates, identity-preserving moves, recoverable deletions, retry backoff, version-based download avoidance, and existing-folder selection with automatic discovery of externally added files. It retains separate per-vault state and device credentials. Desktop and iPhone pairing, Markdown edits, conflicts, and v2 conditional content writes passed in 0.2.1. New desktop 0.3.0 live binary/isolation/move/trash tests passed. The expanded iPhone API probe and PNG display passed. End-to-end folder selection, vault lifecycle, and fault checks remain in progress. FEASIBILITY.md and DEVELOPMENT.md distinguish automated checks, live evidence, and remaining gates.

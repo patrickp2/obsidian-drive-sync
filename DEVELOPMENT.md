@@ -39,12 +39,22 @@ The desktop vault is `test-vaults/drive-sync-auth` (ignored by Git), running Obs
 
 Use matching version numbers in package.json, manifest.json, and the release tag. Run checks and credential scanning before publishing. Attach `main.js`, `manifest.json`, and `styles.css` separately to the GitHub prerelease; BRAT downloads those assets. Do not overwrite older release assets. Update both devices through BRAT or copy built artifacts only into the desktop test vault.
 
-Do not mark the beta production-ready: current limits and remaining gates are in [FEASIBILITY.md](FEASIBILITY.md). Source-level tests do not establish real iOS lifecycle/network behavior. Version 0.3.0 implements attachments and recoverable move/deletion paths. New phone lifecycle and Picker tests must pass before claiming those flows verified on both devices.
+Do not mark the beta production-ready: current limits and remaining gates are in [FEASIBILITY.md](FEASIBILITY.md). Source-level tests do not establish real iOS lifecycle/network behavior. Version 0.3.0 implements attachments and recoverable move/deletion paths. End-to-end folder selection and vault lifecycle tests must pass before claiming those flows verified on both devices.
 
 ## 0.3.0 validation
 
-`npm run check` passes 74 tests, including binary recovery under late writes, pending create/move/trash outcomes after simulated interruption, deletion-vs-edit conflicts, two separate vault states, root-bound state migration, folder rename chains, protected import copies, state-bound Picker callbacks, version-cache behavior, and 2,000-file restart reconciliation.
+`npm run check` passes 77 tests, including binary recovery under late writes, pending create/move/trash outcomes after simulated interruption, deletion-vs-edit conflicts, two separate vault states, root-bound state migration, folder rename chains, existing folder discovery, insufficient-scope rejection, version-cache behavior, and 2,000-file restart reconciliation.
 
 The extended disposable-file command passed on the Mac through the real Obsidian HTTP adapter: two roots with identical paths, arbitrary binary bytes, current/stale content updates, current/stale rename plus parent move, and current/stale trash. Rejected writes returned HTTP 412. Both synthetic roots were moved to trash.
 
-Still required: repeat the expanded command on iPhone; exchange a real attachment between the test vaults; exercise note/folder rename and recoverable deletion through the Obsidian UI; interrupt actual transfers with app termination/network loss; test Google Picker with a synthetic externally created file. Google Picker was enabled with approval; billing remains unlinked. Never revoke the user's normal grants merely to force a test; use an isolated test grant or arrange a user-controlled revocation.
+Still required: exercise note/folder rename and recoverable deletion through the Obsidian UI; interrupt actual transfers with app termination/network loss; test existing-folder selection and automatic discovery of a synthetic externally created file. Google Picker was enabled with approval; billing remains unlinked. Never revoke the user's normal grants merely to force a test; use an isolated test grant or arrange a user-controlled revocation.
+
+## Rapid rename regression
+
+A real desktop test renamed a note twice before the first move was confirmed. Version 0.3.0 treated the intermediate remote path as a competing rename, then downloaded it as an unrelated file and created a duplicate baseline identity. Version 0.4.0 persists attempted move destinations before sending them, blocks intermediate paths, and rechecks current rename intent. Regression tests cover uncertain responses, a second rename, undoing a rename, and actual competing device destinations.
+
+The complete disposable API probe passed on the real iPhone in 0.3.0, including binary byte fidelity, two-folder isolation, stale replacement/move/trash HTTP 412, successful current moves/trash, and recoverable cleanup. The green/gold PNG rendered inside its synced note. Obsidian restart restored the existing independent grant. UI-driven vault rename/deletion and import checks are still in progress.
+
+## Current authorization and folder setup
+
+The user approved full Drive authorization for seamless existing-folder sync and external additions. Version 0.4.0 removes Picker/import code and provides an in-plugin folder browser with an explicit preview and connection step. Whole-Drive token access is disclosed; only configured-folder files are synchronized. Both devices must reconnect once. Google Picker API remains enabled in the test project but is unused; billing remains unlinked. Broader consent and device tests are pending.

@@ -12,6 +12,8 @@ export function loadState(value: unknown, folderId: string): SyncState {
   for (const [path, id] of Object.entries(state.pendingCreates)) if (!syncPath(path) || !/^[A-Za-z0-9_-]+$/.test(id)) throw new Error('Pending upload state is invalid.');
   for (const [path, deleted] of Object.entries(state.deleted)) if (!syncPath(path) || typeof deleted !== 'boolean') throw new Error('Deletion state is invalid.');
   for (const [path, target] of Object.entries(state.renames ?? {})) if (!syncPath(path) || typeof target !== 'string' || !syncPath(target)) throw new Error('Rename state is invalid.');
+  if (state.moveTargets !== undefined && !record(state.moveTargets)) throw new Error('Pending move state is invalid.');
+  for (const [path, target] of Object.entries(state.moveTargets ?? {})) if (!syncPath(path) || typeof target !== 'string' || !syncPath(target)) throw new Error('Pending move state is invalid.');
   return { ...state, folderId, renames: state.renames ?? {} };
 }
 /** Record observed file and folder events before any network reconciliation. */
@@ -22,7 +24,7 @@ export function recordRename(state: SyncState, old: string, destination: string)
     const current = journal[source] ?? source;
     if (current === old || current.startsWith(`${old}/`)) {
       const target = destination + current.slice(old.length);
-      if (target === source) delete journal[source]; else journal[source] = target;
+      if (target === source && !state.moveTargets?.[source]) delete journal[source]; else journal[source] = target;
     }
   }
 }
