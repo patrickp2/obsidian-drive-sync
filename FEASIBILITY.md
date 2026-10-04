@@ -40,6 +40,8 @@ Use a dedicated Google Cloud project without a linked billing account. Do not en
 
 ## Required live checks
 
+Release `0.1.0` was installed through BRAT 2.2.0 into the empty `Test` vault on the real iPhone on 2026-10-04. The settings opened successfully and displayed the Keychain selector: the runtime encryption-availability gate and a secret read both passed. The user entered the client configuration directly on the phone because Mirroring dropped keyboard input. The linked secret appeared in settings, and Connect successfully prepared an authorization request, establishing that the client ID passed format validation and a nonempty secret was readable. The external browser did not visibly open. Release `0.1.1` adds a separate mobile Continue to Google tap after asynchronous PKCE preparation so browser opening occurs within a fresh user gesture. That workaround still requires live verification. Mobile token exchange, secret persistence across restart, and the browser return remain unverified.
+
 - Passed on desktop: exact HTTPS callback, correct token exchange, and isolated wrong/missing verifier rejection. Repeat the flow on iPhone.
 - Passed on desktop: successful consent yields the required scope and a working refresh grant. Denial is unit-tested; live denial remains to check.
 - Restart, refresh, revocation, logout, and reconnect work without exposing secrets.

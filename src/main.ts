@@ -88,7 +88,14 @@ export default class DriveSyncPlugin extends Plugin {
   }
   async connect(verifyPkce?: 'wrong' | 'missing'): Promise<void> {
     if (!this.settings.prototypeAcknowledged) throw new Error('Open Drive Sync settings and acknowledge this authentication-only prototype first.');
-    window.open(await this.auth.begin(verifyPkce), '_blank');
+    const url = await this.auth.begin(verifyPkce);
+    if (Platform.isMobileApp) {
+      // PKCE preparation is asynchronous. Open the external browser from a
+      // fresh tap so the mobile webview retains the required user gesture.
+      new BrowserSignInModal(this.app, url).open();
+    } else {
+      window.open(url, '_blank');
+    }
   }
   showConnection(): void { new ConnectionModal(this.app, this).open(); }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener); }
@@ -98,6 +105,19 @@ export default class DriveSyncPlugin extends Plugin {
     this.statusEl?.setText(`Drive: ${state.status === 'connected' ? 'connected · sync disabled' : state.status.replaceAll('-', ' ')}`);
     for (const listener of this.listeners) listener();
   }
+}
+
+class BrowserSignInModal extends Modal {
+  constructor(app: App, private readonly url: string) { super(app); }
+  onOpen(): void {
+    this.setTitle('Continue to Google');
+    this.contentEl.createEl('p', { text: 'Sign in in your browser, then return to this Obsidian vault to finish connecting.' });
+    new Setting(this.contentEl).addButton(button => button.setButtonText('Continue to Google').setCta().onClick(() => {
+      window.open(this.url, '_blank');
+      this.close();
+    }));
+  }
+  onClose(): void { this.contentEl.empty(); }
 }
 
 class ConnectionModal extends Modal {

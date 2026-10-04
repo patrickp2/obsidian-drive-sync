@@ -1,6 +1,6 @@
 {
   "name": "obsidian-drive-sync",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Authentication-only prototype for an Obsidian Google Drive sync plugin",
   "scripts": {
