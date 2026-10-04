@@ -1,2 +1,2 @@
 .drive-sync-status { cursor: pointer; }
-.drive-sync-warning { color: var(--text-error); }
+.drive-sync-mobile-status { position: absolute; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 65px); z-index: 30; max-width: 75vw; font-size: 12px; padding: 6px 10px; border-radius: 12px; color: var(--text-normal); background: var(--background-secondary); box-shadow: var(--shadow-s); }

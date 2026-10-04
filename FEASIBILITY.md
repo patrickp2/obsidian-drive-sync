@@ -1,50 +1,53 @@
-# Authentication and synchronization feasibility
+# Feasibility and test evidence
 
-Checked on 2026-10-04. This records evidence and limits, not a claim of production readiness.
+Updated 2026-10-04. The design is API access on both desktop and mobile, with ordinary Markdown files in Google Drive. The user explicitly rejected an immutable revision-record format and a hosted authentication/pairing service.
 
-## Implemented and tested on desktop
+## Conditional writes: live result
 
-The authentication-only prototype uses an external browser, a static HTTPS callback, random state, S256 PKCE, one-use callbacks with a ten-minute expiry, direct token exchange and refresh, and device-local Obsidian SecretStorage. It has no Drive file operations and cannot synchronize or delete notes. No existing plugin implementation was copied.
+The v3 `PATCH /upload/drive/v3/files/{id}?uploadType=media` experiment uploaded and downloaded synthetic Markdown correctly, but returned no strong metadata/content ETag. A deliberately nonmatching `If-Match` was accepted with HTTP 200 and replaced the disposable content. This endpoint is not used for replacement writes.
 
-The callback forwards a code or a normalized error plus state, and an optional vault ID extracted from that validated state, to a fixed `obsidian://drive-sync-auth` handler. It removes the query from browser history immediately, has no remote resources or analytics, and blocks network requests with CSP. Its fallback copies the same short-lived return link. The host necessarily receives the initial callback URL; application code cannot control GitHub's platform access logs. No refresh token, client secret, or PKCE verifier reaches the callback page.
+The alternative **v2** `PUT /upload/drive/v2/files/{id}?uploadType=media` passed the actual desktop test using the file's v2 metadata ETag:
 
-## OAuth: experimental web client flow
+1. Upload/download baseline A, including Unicode.
+2. Save B with A's current ETag; verify B, a new ETag, and an advanced version.
+3. Try C with the stale A ETag: **HTTP 412**, with B still intact.
+4. Try C with the current B ETag: **HTTP 200**, C downloaded correctly.
+5. Move all disposable probe resources to Drive trash. Nothing permanently deleted.
 
-Google's [web-server flow](https://developers.google.com/identity/protocols/oauth2/web-server) requires a client secret for token exchange/refresh and permits an exactly registered HTTPS redirect. Google's [native-app flow](https://developers.google.com/identity/protocols/oauth2/native-app) documents PKCE and platform-specific redirects. A desktop client cannot simply be assumed to support our GitHub Pages redirect; an Obsidian plugin cannot register a new native iOS URL scheme in Obsidian's app bundle.
+The sync adapter uses v3 for folder discovery, creation, and downloads; replacement writes use the tested v2 endpoint and a mandatory strong `If-Match`. There is no unconditional replacement fallback. Reads compare ETags before and after downloading to reject inconsistent snapshots. File name and parent checks prevent a moved file from silently leaving the configured folder boundary. See Google's [v2 update reference](https://developers.google.com/workspace/drive/api/reference/rest/v2/files/update).
 
-The prototype accepts the user's own web client and uses PKCE in addition to its client secret. A secret stored in a distributed device app is not confidential client authentication. This is an explicit feasibility experiment, not an established production architecture. Live desktop testing with the dedicated client established normal code exchange, refresh, and rejection of wrong/missing verifiers using independent fresh codes. This does not establish production client-type suitability. Before adopting it, verify the iPhone flow and that the deployment complies with Google's client-type guidance. If this cannot be established, stop and reconsider authentication; no hosted broker has been authorized.
+## Markdown synchronization
 
-Do not distribute a shared client secret or include a developer's client configuration in the public bundle. Each user supplies their own project/client. Google authorization is completed in the user's browser, not an embedded webview. See [Google OAuth best practices](https://developers.google.com/identity/protocols/oauth2/resources/best-practices).
+Implemented: per-device common baselines, automatic scheduling, conditional uploads, atomic guarded local text updates, content-preserving conflict copies, idempotent file-create retries with reserved Drive IDs, complete paginated folder listings, and duplicate-name detection. The Drive folder contains normal Markdown files and normal conflict copies.
 
-External projects in Testing issue short-lived refresh grants for Drive access (typically seven days). A lasting personal installation needs an appropriate audience/publishing configuration; do not describe weekly reconnection as seamless. Internal audience may be appropriate for a user's own Workspace organization, but does not permit unrelated Google accounts.
+Core tests cover desktop-to-phone-to-desktop edits using two independent simulated stores, concurrent offline edits, a competing remote write between read and upload, local edits during download, interrupted uploads/restarts, failed listings, and initial files with differing content. These tests are necessary but do not substitute for two real devices.
 
-## Secret storage
+The real desktop test vault `drive-sync-auth` created its dedicated Drive folder and uploaded `README.md` and `Sync test.md` automatically. Further real-device results belong in DEVELOPMENT.md.
 
-Obsidian exposed SecretStorage in 1.11.4 and announced desktop encryption in [1.11.5](https://obsidian.md/changelog/2026-01-20-desktop-v1.11.5/). The locally installed 1.12.7 application code was inspected without accessing stored user secrets. Its desktop adapter uses Electron safeStorage, but contains a plaintext fallback when encryption is unavailable. The prototype therefore requires the runtime's encryption-availability check to return true. That method is not in the public TypeScript API; absence blocks authentication instead of silently weakening storage.
+Current beta limits: Markdown only, at most 5 MB per note; attachments are not transferred; intentional deletions and remote moves are preserved for review rather than propagated automatically. Concurrent creation of duplicate Drive folder/file names stops reconciliation for review. No initial import of arbitrary pre-existing Drive folders is implemented. Do not use this beta on important notes yet.
 
-The same application bundle delegates mobile storage to a native SecureStorage adapter. This is evidence of its implementation path, not proof of the actual iPhone's keychain or backup behavior. Validate persistence and device isolation on the real iPhone before describing those guarantees as confirmed. No secrets are stored in plugin `data.json` or vault files.
+## Authentication
 
-The [public SecretStorage API](https://docs.obsidian.md/plugins/guides/secret-storage) exposes synchronous get/set operations, not an awaited durable-write acknowledgment. A read-back check detects an immediate failure but does not prove a disk write survived termination. Plugin reload and test-vault renderer reload both successfully restored the grant in Obsidian 1.13.7. Complete application restart and real-device tests remain required. Plugins share this store; it is not a security boundary against another malicious plugin. Disconnect blanks the plugin's refresh-token entry through the public setter; Obsidian Keychain can remove the empty entry. The user-supplied client-secret entry remains available for reconnecting.
+External browser, random state, S256 PKCE, ten-minute one-use callbacks, static HTTPS redirect, direct token exchange/refresh, and device-local SecretStorage are implemented. Both desktop and actual iPhone sign-in and refresh passed. iPhone access automatically restored after force-closing and relaunching Obsidian. Desktop plugin/vault reload recovery passed. Wrong/missing PKCE verifiers were rejected in separate fresh-code desktop tests. Unit tests cover denial, replay, revocation handling, refresh retry, and interruption races.
 
-Pending logins and access tokens stay in memory. If Obsidian is terminated during sign-in, the returning callback is rejected and the user starts again. A persisted refresh grant is used to reconnect after an ordinary restart.
+The callback removes its query from browser history, relays only code/error and state to a fixed Obsidian handler, has no analytics or remote resources, and blocks requests with CSP. No client secret, verifier, or refresh token goes to the callback page. Its host necessarily receives the initial callback URL; we cannot control GitHub platform access logs.
 
-## Drive permissions and overwrite protection
+Production suitability of using a user's Google Web application client on a device remains unresolved. Successful OAuth tests do not make device-stored secrets confidential client authentication. Each user owns/configures their project; no shared developer credentials are bundled. A hosted broker is not authorized. See [Google's native-app guidance](https://developers.google.com/identity/protocols/oauth2/native-app) and [OAuth best practices](https://developers.google.com/identity/protocols/oauth2/resources/best-practices).
 
-The prototype requests only `drive.file`. It makes no Drive file requests. This does not establish access to every descendant of a selected existing folder. Before adding sync, prove visibility of files created from both devices, including when their client IDs differ, and separately design any existing-folder import.
+External Google projects in Testing commonly issue seven-day Drive refresh grants. Appropriate audience/publishing configuration is required for lasting use. Internal audience restricts accounts to the qualifying Workspace organization.
 
-The [Drive file resource](https://developers.google.com/workspace/drive/api/reference/rest/v3/files) exposes checksums, a version, and a head revision. The current `files.update` reference does not establish the conditional-content-write behavior we need. A Google Calendar ETag example is not proof of Drive support. Test the exact Drive upload endpoint with competing writes before enabling replacement uploads. If Google does not reject a stale precondition, retain edits separately and revisit the storage design.
+## Pairing and storage
 
-## Billing
+Add device now creates a temporary desktop listener bound to a private IPv4 interface. Its three-minute QR invitation carries a random 256-bit pairing key. AES-GCM authenticates/encrypts each direction with the session ID and direction bound as associated data; a request nonce binds the response. Desktop approval and one-use consumption are required. Configuration transfer includes the client ID, client secret, and Drive folder ID only. Tokens and pending OAuth state never transfer. Closing the panel, unloading, or expiry closes the listener. The QR/link must remain private. No hosted relay is involved.
 
-Use a dedicated Google Cloud project without a linked billing account. Do not enable paid quota increases, compute, or a token broker. Standard [Drive API usage](https://developers.google.com/workspace/drive/api/guides/limits) is currently free; Google has announced a future paid tier above thresholds. Recheck before any billing change. The static callback uses GitHub Pages and is subject to its availability and rate limits.
+Cryptographic tests cover wrong keys/sessions, reflected envelopes, replayed responses, and invalid endpoints. A real local-network listener round trip on the Mac passed with synthetic credentials. Actual iPhone QR handoff, local networking, and paired configuration storage are not yet verified.
 
-## Required live checks
+SecretStorage's runtime encryption-availability gate passed on the actual desktop/iPhone. The plugin fails closed if that undocumented check is absent or false. The public SecretStorage API has no awaited durable-write acknowledgment: immediate read-back plus restart testing provides evidence, not a universal backup/isolation guarantee. Plugins share the store, so it does not isolate secrets from malicious plugins. No Google secret/token is written to vault/plugin JSON or source/release assets.
 
-Release `0.1.0` was installed through BRAT 2.2.0 into the empty `Test` vault on the real iPhone on 2026-10-04. The settings opened successfully and displayed the Keychain selector: the runtime encryption-availability gate and a secret read both passed. The user entered the client configuration directly on the phone because Mirroring dropped keyboard input. The linked secret appeared in settings, and Connect successfully prepared an authorization request, establishing that the client ID passed format validation and a nonempty secret was readable. The external browser did not visibly open. Release `0.1.1` adds a separate mobile Continue to Google tap after asynchronous PKCE preparation so browser opening occurs within a fresh user gesture. That workaround still requires live verification. Mobile token exchange, secret persistence across restart, and the browser return remain unverified.
+## Permissions, billing, and remaining gates
 
-- Passed on desktop: exact HTTPS callback, correct token exchange, and isolated wrong/missing verifier rejection. Repeat the flow on iPhone.
-- Passed on desktop: successful consent yields the required scope and a working refresh grant. Denial is unit-tested; live denial remains to check.
-- Restart, refresh, revocation, logout, and reconnect work without exposing secrets.
-- iPhone browser returns to the originating disposable vault; wrong or missing pending state is rejected.
-- Actual mobile secret persistence/protection and interruption behavior are established.
-- Conditional Drive writes and scope visibility are proven using synthetic files before sync is enabled.
+Only `drive.file` is requested. The plugin restricts operations to the dedicated app-created root, but the Google token itself is not folder-scoped. It does not automatically authorize every file created externally inside that folder. Real cross-device visibility must be tested with each device's independent grant and the same OAuth client.
+
+The dedicated test Google project has no linked billing account. No paid compute or hosted pairing/token service was created. Recheck [Drive API billing/limits](https://developers.google.com/workspace/drive/api/guides/limits) before enabling paid services or expanding usage.
+
+Remaining gates include actual iPhone pairing and edit cycles, mobile conditional uploads, full desktop application restart, additional live denial/revocation/interruption tests, production OAuth suitability, attachment support, recoverable deletion/rename reconciliation, and broader stress testing. A successful connection or one conditional-write test alone is not full production readiness.

@@ -34,7 +34,7 @@ function requiredString(value: unknown): string {
 }
 
 export class AuthSession {
-  state: AuthState = { status: 'disconnected', message: 'Not connected. Sync is disabled.' };
+  state: AuthState = { status: 'disconnected', message: 'Not connected.' };
   private pending: PendingLogin | null = null;
   private accessToken: string | null = null;
   private expiresAt = 0;
@@ -90,7 +90,7 @@ export class AuthSession {
     const params = new URLSearchParams({ client_id: client.clientId, redirect_uri: CALLBACK_URL,
       response_type: 'code', scope: DRIVE_SCOPE, state, code_challenge: challenge,
       code_challenge_method: 'S256', access_type: 'offline', prompt: 'consent' });
-    this.publish('awaiting-browser', 'Finish connecting in your browser. Sync is disabled.');
+    this.publish('awaiting-browser', 'Finish connecting in your browser.');
     return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   }
   async complete(response: AuthCallback): Promise<void> {
@@ -119,7 +119,7 @@ export class AuthSession {
     }
     const generation = this.generation;
     this.exchangeInFlight = true;
-    this.publish('connecting', 'Checking your Google connection. Sync is disabled.');
+    this.publish('connecting', 'Checking your Google connection.');
     let pkceStage = 'starting checks';
     try {
       const exchangeBody = new URLSearchParams({
@@ -149,7 +149,7 @@ export class AuthSession {
             typeof rejection.error_description !== 'string' || !/verifier|code.challenge|pkce/i.test(rejection.error_description)) {
           throw new Error('PKCE rejection could not be established.');
         }
-        this.publish('test-complete', `Google rejected the ${mode} PKCE verifier. Test passed; no new token saved. Sync is disabled.`);
+        this.publish('test-complete', `Google rejected the ${mode} PKCE verifier. Test passed; no new token saved.`);
         return;
       }
       pkceStage = 'correct verifier exchange';
@@ -158,7 +158,7 @@ export class AuthSession {
       // Never carry a previous account's refresh grant into a new login.
       this.accept(result, current.clientId);
     } catch {
-      const message = pending.verifyPkce ? `PKCE verification failed or was inconclusive at: ${pkceStage}. Sync remains disabled. Reconnect before further testing.` : 'Could not complete sign-in. Start again.';
+      const message = pending.verifyPkce ? `PKCE verification failed or was inconclusive at: ${pkceStage}. Reconnect before further testing.` : 'Could not complete sign-in. Start again.';
       if (!this.stopped && generation === this.generation) this.publish('needs-reconnect', message);
       throw new Error(message);
     } finally { this.exchangeInFlight = false; }
@@ -179,7 +179,7 @@ export class AuthSession {
     this.retryDelay = 30_000;
     this.accessToken = token;
     this.expiresAt = this.now() + data.expires_in * 1000;
-    this.publish('connected', previous ? 'Google access refreshed successfully. Sync is disabled in this prototype.' : 'Connected to Google. Sync is disabled in this prototype.');
+    this.publish('connected', previous ? 'Google access refreshed successfully.' : 'Connected to Google.');
   }
   refresh(): Promise<void> {
     if (this.refreshInFlight) return this.refreshInFlight;
@@ -194,7 +194,7 @@ export class AuthSession {
     const client = this.client();
     if (!grant || grant.clientId !== client.clientId) throw new Error('Connect Google on this device first.');
     const generation = this.generation;
-    this.publish('refreshing', 'Refreshing Google access. Sync is disabled.');
+    this.publish('refreshing', 'Refreshing Google access.');
     try {
       const result = await this.transport(TOKEN_URL, new URLSearchParams({
         client_id: client.clientId, client_secret: client.clientSecret,
@@ -212,7 +212,7 @@ export class AuthSession {
       if (!this.stopped && generation === this.generation) {
         this.retryAt = this.now() + this.retryDelay;
         this.retryDelay = Math.min(this.retryDelay * 2, 5 * 60_000);
-        this.publish('retrying', 'Could not refresh Google access. Retrying automatically. Sync is disabled.');
+        this.publish('retrying', 'Could not refresh Google access. Retrying automatically.');
       }
       throw new Error('Could not refresh Google access. Check your connection and try again.');
     }
@@ -221,6 +221,14 @@ export class AuthSession {
     if ((this.state.status === 'connected' && this.expiresAt - this.now() < 60_000) ||
         (this.state.status === 'retrying' && this.now() >= this.retryAt)) await this.refresh();
   }
+  async tokenForDrive(): Promise<string> {
+    if (this.stopped || this.pending || this.exchangeInFlight) throw new Error('Finish connecting Google first.');
+    if (!this.accessToken || this.expiresAt - this.now() < 60_000) await this.refresh();
+    if (this.stopped || this.state.status !== 'connected' || !this.accessToken || this.expiresAt <= this.now()) {
+      throw new Error('A working Google connection is required.');
+    }
+    return this.accessToken;
+  }
   async disconnect(): Promise<void> {
     ++this.generation;
     this.pending = null;
@@ -228,7 +236,7 @@ export class AuthSession {
     this.accessToken = null;
     this.expiresAt = 0;
     this.secrets.clear(this.key);
-    this.publish('disconnected', 'Disconnected on this device. Sync is disabled.');
+    this.publish('disconnected', 'Disconnected on this device.');
     if (token) {
       try {
         const response = await this.transport(REVOKE_URL, new URLSearchParams({ token }));

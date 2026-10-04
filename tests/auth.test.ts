@@ -196,3 +196,17 @@ test('PKCE probe never stores a token issued for an invalid verifier', async () 
   assert.ok(f.calls[1]!.url.endsWith('/revoke'));
   assert.equal(f.session.state.status, 'needs-reconnect');
 });
+
+test('Drive token access refreshes expiry and refuses a revoked or stopped session', async () => {
+  const f = fixture(); await authorize(f);
+  assert.equal(await f.session.tokenForDrive(), 'synthetic-access-token');
+  assert.equal(f.calls.length, 1);
+  f.advance(3600_000);
+  f.setHandler(async () => success({ access_token: 'renewed-access-token' }));
+  assert.equal(await f.session.tokenForDrive(), 'renewed-access-token');
+  f.advance(3600_000);
+  f.setHandler(async () => ({ status: 400, json: { error: 'invalid_grant' } }));
+  await assert.rejects(f.session.tokenForDrive(), /working Google connection/);
+  f.session.stop();
+  await assert.rejects(f.session.tokenForDrive(), /Finish connecting/);
+});

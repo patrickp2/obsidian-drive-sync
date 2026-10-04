@@ -1,9 +1,9 @@
 {
   "id": "drive-sync",
   "name": "Drive Sync",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "minAppVersion": "1.12.7",
-  "description": "Experimental Google authentication prototype. Vault synchronization is disabled.",
+  "description": "Sync Markdown with your own Google Drive project. Development beta: test vaults only.",
   "author": "Patrick Peters",
   "authorUrl": "https://github.com/patrickp2",
   "isDesktopOnly": false
