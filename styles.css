@@ -1,0 +1,2 @@
+.drive-sync-status { cursor: pointer; }
+.drive-sync-warning { color: var(--text-error); }

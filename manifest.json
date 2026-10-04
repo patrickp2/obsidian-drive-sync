@@ -1,0 +1,10 @@
+{
+  "id": "drive-sync",
+  "name": "Drive Sync",
+  "version": "0.1.0",
+  "minAppVersion": "1.12.7",
+  "description": "Experimental Google authentication prototype. Vault synchronization is disabled.",
+  "author": "Patrick Peters",
+  "authorUrl": "https://github.com/patrickp2",
+  "isDesktopOnly": false
+}
