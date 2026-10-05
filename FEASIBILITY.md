@@ -52,7 +52,7 @@ Version 0.4.0 requests `drive` (whole-Drive access), approved by the user for au
 
 The dedicated test Google project has no linked billing account. No paid compute or hosted pairing/token service was created. Recheck [Drive API billing/limits](https://developers.google.com/workspace/drive/api/guides/limits) before enabling paid services or expanding usage.
 
-Remaining gates include full desktop application restart, real-iPhone attachment/move/trash and fault tests for 0.3.0, existing-folder selection and automatic external-file discovery, live revoked-grant tests, production OAuth suitability, and real-network stress testing. Automated fault tests and a 2,000-file simulation pass; these do not establish iOS suspension behavior. A successful connection or one conditional-write test alone is not full production readiness.
+Remaining gates include full desktop application restart, controlled mid-transfer termination/network tests, live revoked-grant tests, production OAuth suitability (deferred by the user), and real-network stress testing. Real-vault attachment replacement, note/folder moves, recoverable deletions in both directions, iPhone restart catch-up, external-file discovery, and second-desktop-vault existing-folder selection passed in 0.4.1; see DEVELOPMENT.md. Automated fault tests and a 2,000-file simulation pass; these do not establish iOS suspension behavior. A successful connection or one conditional-write test alone is not full production readiness.
 
 ## 0.3.0 desktop lifecycle evidence (2026-10-04)
 

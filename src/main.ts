@@ -78,10 +78,6 @@ export default class DriveSyncPlugin extends Plugin {
     }
     const ribbon = this.addRibbonIcon('cloud', 'Drive Sync status', () => this.showConnection());
     this.subscribe(() => ribbon.setAttribute('aria-label', `Drive Sync: ${this.syncMessage}`));
-    if (Platform.isMobileApp) {
-      this.mobileStatus = this.app.workspace.containerEl.createEl('button', { cls: 'drive-sync-mobile-status', attr: { 'aria-label': 'Drive Sync status' } });
-      this.registerDomEvent(this.mobileStatus, 'click', () => this.showConnection());
-    }
     this.addCommand({ id: 'show-connection', name: 'Show sync status', callback: () => this.showConnection() });
     this.addCommand({ id: 'sync-now', name: 'Sync now', callback: () => void this.syncNow() });
     this.addCommand({ id: 'test-drive-edits', name: 'Developer: test disposable Drive files', callback: () => new DriveProbeModal(this.app, this).open() });
@@ -107,7 +103,16 @@ export default class DriveSyncPlugin extends Plugin {
     }));
     this.registerInterval(window.setInterval(() => { if (this.settings.syncEnabled) void this.syncNow(); }, 30_000));
     this.registerDomEvent(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') { this.setMessage('Checking Drive…'); void this.syncNow(); } });
-    this.app.workspace.onLayoutReady(() => { void this.run(async () => { await this.auth.restore(); await this.syncNow(); }, false); });
+    this.app.workspace.onLayoutReady(() => {
+      if (this.unloaded) return;
+      // Mobile rebuilds its workspace during startup, removing earlier children.
+      if (Platform.isMobileApp) {
+        this.mobileStatus = this.app.workspace.containerEl.createEl('button', { cls: 'drive-sync-mobile-status', attr: { 'aria-label': 'Drive Sync status' } });
+        this.registerDomEvent(this.mobileStatus, 'click', () => this.showConnection());
+        this.updateStatus();
+      }
+      void this.run(async () => { await this.auth.restore(); await this.syncNow(); }, false);
+    });
     this.updateStatus();
   }
   onunload(): void {

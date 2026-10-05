@@ -61,4 +61,22 @@ The user approved full Drive authorization for seamless existing-folder sync and
 
 ## Hidden recovery storage regression
 
-The real iPhone in 0.4.0 stopped an incoming rename with “Folder already exists.” Obsidian excludes hidden `.trash` folders from its indexed Vault API. Version 0.4.1 checks physical folders through the storage adapter, reads hidden backup bytes through the adapter, and restores hidden sources through the adapter. Visible note operations still use the Vault API. Three regression tests cover consecutive moves/removals with pre-existing hidden trash, restoring a late binary edit, and occupied/invalid recovery paths. All 80 tests and the build credential scan pass. Real-device verification of this fix is pending.
+The real iPhone in 0.4.0 stopped an incoming rename with “Folder already exists.” Obsidian excludes hidden `.trash` folders from its indexed Vault API. Version 0.4.1 checks physical folders through the storage adapter, reads hidden backup bytes through the adapter, and restores hidden sources through the adapter. Visible note operations still use the Vault API. Three regression tests cover consecutive moves/removals with pre-existing hidden trash, restoring a late binary edit, and occupied/invalid recovery paths. All 80 tests and the build credential scan pass. Real-device verification passed as recorded below.
+
+
+## 0.4.1 real-vault lifecycle evidence, 2026-10-04
+
+Both test devices run 0.4.1 with independent full-Drive grants. Google Cloud data-access configuration also shows the full Drive scope saved.
+
+- A synthetic Markdown file uploaded through Drive web reached the Mac and iPhone automatically. Renaming it on the iPhone propagated to the Mac with the same Drive file ID. The Mac's hidden recovery copy matched the original bytes.
+- Replacing a PNG on the Mac preserved its Drive ID; the new purple/cyan image rendered in the iPhone note. Renaming its parent folder on the Mac moved all supported files with stable IDs; the phone received the new paths and rendered the attachment there.
+- A Mac note deletion reached the phone. A separate iPhone note deletion reached the Mac after an immediate phone force-close/relaunch; the deleted note stayed absent and the Mac recovery copy matched its original SHA-256. A note created on the Mac while the phone was closed appeared in the phone file list after relaunch. No new sign-in was needed.
+- A transient iPhone “network connection was lost” error cleared on automatic retry. This was an observed network failure, not a controlled mid-transfer interruption test.
+- Obsidian's existing hidden trash no longer blocked incoming renames. Mac rename and propagated deletion recovery copies were verified byte-for-byte.
+- The in-plugin folder browser listed a synthetic folder created through Drive web, navigated into it, and previewed its name, local vault name, folder ID, and one existing supported file. Connecting it to a second desktop vault downloaded that file byte-for-byte and uploaded a local synthetic note. The two vaults have different instance IDs, folder IDs, baselines, and file IDs; neither received the other's files. Keychain configuration had to be added separately in the second vault; Google tokens were not copied.
+
+Remote moves can close a currently open old-path note; reopen its new path. Empty old directories are retained because empty-folder synchronization is outside the current implementation. Controlled mid-transfer termination/network tests, live revoked-grant recovery, and large real-network stress remain unverified. Production OAuth review remains deferred by the user.
+
+## 0.4.2 mobile status startup
+
+After a cold iPhone launch, the engine synchronized correctly but the floating status button was absent. The button is now attached after Obsidian reports its workspace layout ready, instead of during plugin loading. Unloading before layout readiness prevents delayed setup. All 80 tests, type checking, build, and credential scan pass; cold-start UI verification follows deployment.
