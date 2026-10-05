@@ -89,7 +89,7 @@ The live Mac flow discovered drive-sync-auth from a new drive-sync-reuse vault, 
 
 Developer synthetic validation adds a manifest checksum checker and one-shot transfer barriers. A barrier holds a successful real Google content response before the engine can checkpoint it, enabling deterministic app-termination tests. It requires a synthetic fixture manifest and explicit arming; it logs no token, request body or response content, is never armed at startup, and times out after two minutes. Tests cover content-only matching, error responses, cancellation and byte validation. All 87 tests and build credential scanning pass. Live interruption/revocation/larger-vault outcomes are recorded after execution.
 
-### 0.5.0 live validation, 4 October 2026 (in progress)
+### 0.5.0 live validation, 4 October 2026
 
 Revoked the Google grant using the isolated existing-folder vault's Disconnect control. The other desktop vault and real iPhone independently reported “Reconnect Google”; all ten original desktop fixture files retained their SHA-256 checksums. Saved a new local note during revoked access. After reconnection, its Drive baseline appeared and the note arrived on iPhone. This exercised a real invalidated grant, not a mocked error. The other desktop grant was reconnected and resumed automatic sync; it reported Synced with Drive.
 
@@ -108,3 +108,16 @@ The 259-file batch fully uploaded on the Mac: every local fixture SHA-256 matche
 The larger iPhone run encountered repeated native transport exceptions on ordinary small-note reads, advancing between failures but reaching long whole-cycle backoff. Native GET transport exceptions now receive at most two short retries (250 ms then 1 s), before the existing whole-cycle backoff. HTTP responses are not retried by this helper; writes are never replayed by it, and unload prevents further attempts. Read snapshot ETag checks remain intact. Two regression tests cover read recovery, bounded failure, unload, HTTP responses, and no automatic write replay. All 89 tests and the build credential scan pass.
 
 A bounded three-day follow-up checks the disposable fixture every twelve hours until 2026-10-08T01:10:33Z. The helper scripts/soak-check.mjs verifies fixture bytes and saved desktop baselines and can make twelve small synthetic note edits per round. It does not treat desktop checkpoints as proof of current phone bytes. Phone verification remains a separate real-device check; the full Mac restart remains deferred.
+
+
+### 0.5.2 completed recovery and initial stress evidence
+
+Installed 0.5.2 through BRAT on the real iPhone and copied/reloaded it in all three disposable desktop vault windows. The full desktop application and real user workspace were not restarted. Published asset SHA-256 digests matched the tested local build.
+
+At 18:16 PDT on 4 October, the phone validator reported **PASS: 259 files, 11,604,562 bytes, all SHA-256 checksums match; no extra files**. This completed recovery from both controlled app-termination tests: a held successful Google upload before local checkpoint, and a held successful download before local checkpoint. The uploaded note reached the Mac exactly once with its original 103 bytes and a single Drive ID. Editing it on the phone afterward reached the Mac under that same ID; a subsequent Mac reply appeared in the phone editor at 18:18, with Synced with Drive visible.
+
+The controlled failures terminated the app at a deterministic response/checkpoint boundary. They did not toggle the phone's radio or prove every possible mid-stream failure. Actual native network-loss exceptions were also observed during the larger run. Their repeated whole-cycle backoff motivated the bounded read retry in this release.
+
+The first soak round changed twelve existing notes and their checksum manifest at 18:16:52 PDT. All 259 desktop fixture hashes matched the updated confirmed Drive baselines by 18:17:32; pending journals were empty, and all 268 total baseline file IDs were unique. The iPhone was backgrounded and resumed, then showed the new Mac reply and Synced with Drive. Mirroring stopped accepting clicks before a second full checksum result could be obtained; direct phone verification of this updated round was requested. Do not count the first checksum pass as proof of later edits.
+
+All three desktop vaults remain enabled with separate Drive roots and identities (268, 2, and 1 baseline files). The newly reused setup completed its own Google sign-in and isolated upload. The three-day soak is running, not passed; its first edit round is recorded in the ignored test-vaults/.drive-sync-soak.json log. Full Mac restart, a controlled radio/network outage, and production OAuth suitability remain outstanding or deferred as described in FEASIBILITY.md.
