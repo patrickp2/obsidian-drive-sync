@@ -142,3 +142,12 @@ The 0.6.0 release was withdrawn after real desktop validation reproduced an unre
 Cleanup now explicitly discards component return values. A regression test uses an Obsidian-style thenable component to verify successful and failed operations reset the button without promise assimilation. `npm run check` covers 104 tests. The private-network integration test is unchanged. Real desktop revalidation passed: Full reconciliation returned to Synced with Drive, re-enabled its button, and the modal closed normally. The renderer returned to 0.0% CPU and approximately 170 MB RSS in the post-check sample. No note content was changed for this check.
 
 The real iPhone Personal vault was updated through BRAT from 0.6.0 to 0.6.1. Its Full reconciliation button returned to Synced with Drive at 19:58:27 PDT; the button re-enabled and the modal closed normally. Both devices retain their existing Google connections. Nearby notifications are not paired on these devices yet; the 60-second changes-feed fallback remains active.
+
+## Real nearby-device timing check — 4 October 2026
+
+Personal on the Mac and iPhone were paired again on 0.6.1; the phone retained its Google grant and reported “Nearby desktop connected.” Both apps remained open, and no Sync now command was used during the measurements. A temporary note was already present on both devices.
+
+- Desktop → iPhone: the local file was saved at 20:22:57.870 PDT. The open phone note still showed its old contents at 20:23:03.297, and showed the desktop marker by 20:23:07.984: observed delivery between 5.4 and 10.2 seconds.
+- iPhone → desktop: the marker was typed in the phone editor during 20:24:50.836–20:24:51.125 PDT. The desktop file changed at 20:24:58.856 (observed by a 100 ms file watcher at 20:24:58.915): approximately 7.7–8.1 seconds. The desktop editor also displayed the same marker.
+
+These are one real edit in each direction, not a latency guarantee or a load test. Mirroring input/focus interruptions delayed setup; they are excluded from the measurements. An initial clipboard attempt inserted the already-used, expired pairing invitation instead of the marker; keyboard input replaced it before the measured reverse edit. The disposable timing note is removed after validation.
