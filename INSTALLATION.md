@@ -97,7 +97,7 @@ Remote removals remain in Google Drive trash, subject to Google's retention rule
 
 The current limits are 20 MB per file and 1,000 folders per vault. Hidden paths, Obsidian configuration, Google-native documents, and shortcuts are excluded. Duplicate or case/Unicode-colliding names stop the check for review. Empty folders are not synchronized or automatically removed. Rename intent is recorded while the plugin is running; changes made while it was unloaded may produce preserved duplicate paths requiring review.
 
-Failed native read requests get two short retries; continuing failures back off up to five minutes. Unchanged Drive versions avoid repeat content downloads. The automated large-vault test covers 2,000 synthetic files. A real iPhone verified a 259-file, approximately 11.6 MB fixture including two 5 MiB attachments; a three-day soak is still in progress. These checks are not a performance guarantee. Keep both devices on the same release while testing.
+Failed native read requests get two short retries; continuing failures back off up to five minutes. Unchanged Drive versions avoid repeat content downloads. The automated large-vault test covers 2,000 synthetic files. A real iPhone verified a 259-file, approximately 11.6 MB fixture including two 5 MiB attachments; a repeated-edit round also passed. The scheduled multi-day soak was paused in favor of normal user testing. These checks are not a performance guarantee. Keep both devices on the same release while testing.
 
 ## Google Drive for desktop
 
