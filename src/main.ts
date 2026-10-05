@@ -116,7 +116,7 @@ export default class DriveSyncPlugin extends Plugin {
       void this.run(() => this.saveSettings(), false); changed();
     }));
     this.registerInterval(window.setInterval(() => { if (this.settings.syncEnabled) void this.syncNow(); }, 30_000));
-    this.registerDomEvent(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') { this.setMessage('Checking Drive…'); void this.syncNow(); } });
+    this.registerDomEvent(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') void this.syncNow(); });
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
       // Mobile rebuilds its workspace during startup, removing earlier children.
@@ -148,7 +148,7 @@ export default class DriveSyncPlugin extends Plugin {
   private setMessage(message: string): void { this.syncMessage = message; this.updateStatus(); }
   private schedule(): void {
     if (this.unloaded || !this.settings.syncEnabled || !this.settings.folderId) return;
-    if (!this.running) this.setMessage('Changes pending');
+    if (!this.running) this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : Date.now() < this.retryAt ? 'Sync incomplete · retrying' : 'Changes pending');
     if (this.timer) window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => { this.timer = undefined; void this.syncNow(); }, Math.max(1500, this.retryAt - Date.now()));
   }
@@ -241,7 +241,7 @@ export default class DriveSyncPlugin extends Plugin {
     if (this.unloaded) return Promise.resolve();
     if (!this.settings.folderId || this.settings.folderPending) { this.setMessage(this.auth.state.status === 'connected' ? 'Connected · choose a sync folder' : 'Connect Google to begin'); return Promise.resolve(); }
     if (!this.settings.syncEnabled) { this.setMessage('Paused'); return Promise.resolve(); }
-    if (Date.now() < this.retryAt) return Promise.resolve();
+    if (Date.now() < this.retryAt) { this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : 'Sync incomplete · retrying'); return Promise.resolve(); }
     this.dirty = false; this.setMessage('Syncing…');
     if (this.settings.syncState.folderId && this.settings.syncState.folderId !== this.settings.folderId) { this.setMessage('Sync folder does not match this vault’s saved state'); return Promise.resolve(); }
     this.settings.syncState.folderId = this.settings.folderId;

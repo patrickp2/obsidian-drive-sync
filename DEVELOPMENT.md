@@ -88,3 +88,15 @@ A new desktop vault can discover configured open vaults over the same-origin Bro
 The live Mac flow discovered drive-sync-auth from a new drive-sync-reuse vault, displayed matching codes, completed source approval, saved the destination's Keychain configuration, and left it disconnected with no folder. Automated checks cover encrypted-only transport, exclusion of unrelated state, cancellation, unload, denial, expiry, tampering and replay.
 
 Developer synthetic validation adds a manifest checksum checker and one-shot transfer barriers. A barrier holds a successful real Google content response before the engine can checkpoint it, enabling deterministic app-termination tests. It requires a synthetic fixture manifest and explicit arming; it logs no token, request body or response content, is never armed at startup, and times out after two minutes. Tests cover content-only matching, error responses, cancellation and byte validation. All 87 tests and build credential scanning pass. Live interruption/revocation/larger-vault outcomes are recorded after execution.
+
+### 0.5.0 live validation, 4 October 2026 (in progress)
+
+Revoked the Google grant using the isolated existing-folder vault's Disconnect control. The other desktop vault and real iPhone independently reported “Reconnect Google”; all ten original desktop fixture files retained their SHA-256 checksums. Saved a new local note during revoked access. After reconnection, its Drive baseline appeared and the note arrived on iPhone. This exercised a real invalidated grant, not a mocked error. The other desktop grant was reconnected and resumed automatic sync; it reported Synced with Drive.
+
+Published release assets match local SHA-256 digests. Installed 0.5.0 through BRAT on the real iPhone. Started 259 synthetic fixture files (11,604,562 bytes including two 5 MiB binary attachments); completion and phone checksums are pending. Actual iPhone force-close tests reached held successful upload and download responses and relaunched; final convergence remains under observation.
+
+The reused-configuration vault subsequently completed a fresh Google sign-in without manual credential entry, created its own third Drive folder, and uploaded its own synthetic note. The three roots and per-vault identities remain distinct.
+
+### 0.5.1 status diagnostics
+
+Live interruption testing exposed a display issue: filesystem events during backoff could replace a reconnect/retry message with Changes pending. Scheduling and resume now retain the actionable state. Download errors include the affected vault path while preserving StaleWrite handling. These changes do not alter overwrite decisions or retry delays. All 87 checks and the build credential scan pass.

@@ -115,13 +115,18 @@ export class DriveStore implements RemoteStore {
     return { etag: data.etag, version: typeof data.version === 'string' ? data.version : undefined };
   }
   async read(file: RemoteFile): Promise<RemoteRead> {
-    const before = await this.metadata(file);
-    const response = await this.request({ url: `${API}/${identifier(file.id)}?alt=media`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } });
-    const content = markdown(file.path) ? response.text : response.arrayBuffer;
-    if (content === undefined || bytes(content).byteLength > MAX_FILE_BYTES) throw new Error('Missing binary response or file exceeds 20 MB.');
-    const after = await this.metadata(file);
-    if (before.etag !== after.etag) throw new StaleWrite();
-    return { content, etag: after.etag, version: after.version };
+    try {
+      const before = await this.metadata(file);
+      const response = await this.request({ url: `${API}/${identifier(file.id)}?alt=media`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } });
+      const content = markdown(file.path) ? response.text : response.arrayBuffer;
+      if (content === undefined || bytes(content).byteLength > MAX_FILE_BYTES) throw new Error('Missing binary response or file exceeds 20 MB.');
+      const after = await this.metadata(file);
+      if (before.etag !== after.etag) throw new StaleWrite();
+      return { content, etag: after.etag, version: after.version };
+    } catch (error) {
+      if (error instanceof StaleWrite) throw error;
+      throw new Error(`Reading ${file.path}: ${error instanceof Error ? error.message : 'Drive request failed.'}`);
+    }
   }
   private async parent(path: string): Promise<string> {
     const parts = path.split('/'); parts.pop(); let prefix = ''; let parent = this.folderId;

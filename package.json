@@ -1,6 +1,6 @@
 {
   "name": "obsidian-drive-sync",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "private": true,
   "description": "Google Drive vault sync beta with guarded writes and local device pairing",
   "scripts": {
