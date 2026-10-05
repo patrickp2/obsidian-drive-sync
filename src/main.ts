@@ -1,3 +1,4 @@
+import { finishUiAction } from './ui-action';
 import { runLifecycleProbe } from './lifecycle-probe';
 import type { AuthCallback } from './protocol';
 import { loadState, recordRename, recordDeletion } from './state';
@@ -522,7 +523,7 @@ class ConnectionModal extends Modal {
     const advanced = this.contentEl.createEl('details'); advanced.createEl('summary', { text: 'Connection and diagnostics' });
     new Setting(advanced).setName('Full reconciliation').setDesc('Recovery check: rebuilds indexes and reads every file on both sides. Existing conflict copies and deletion protections remain in effect; large vaults can take time.')
       .addButton(b => b.setButtonText('Full reconciliation').onClick(() => {
-        b.setDisabled(true); void this.plugin.syncNow(true).finally(() => b.setDisabled(false));
+        b.setDisabled(true); void this.plugin.run(() => finishUiAction(this.plugin.syncNow(true), () => b.setDisabled(false)));
       }));
     new Setting(advanced).addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())))
       .addButton(b => b.setButtonText('Test refresh').onClick(() => void this.plugin.run(() => this.plugin.auth.refresh())));

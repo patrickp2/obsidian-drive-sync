@@ -134,3 +134,9 @@ The scheduled soak was paused on 4 October 2026 after the user chose normal use 
 Runtime indexes are separate from the baseline: `remote-index.json` checkpoints the remote tree and change cursor together; a missing or damaged cache forces a fresh scan. Local fingerprints are memory-only and are cleared on resume/full reconciliation. Neither cache replaces guarded writes or the recovery journal. An unchanged vault still enumerates local paths/metadata in memory; it no longer reads every file’s contents or recursively lists every Drive folder on each heartbeat.
 
 Release validation must distinguish these automated results from checks performed through Obsidian and iPhone Mirroring. Existing Google grants remain local; old pairs continue using the heartbeat until re-paired for nearby hints.
+
+## 0.6.1 full-reconciliation UI fix
+
+The 0.6.0 release was withdrawn after real desktop validation reproduced an unresponsive renderer when a full check completed. Debugger inspection found repeated promise assimilation in Obsidian’s chainable component `then` method: the button-reset `finally` callback returned the result of `setDisabled(false)`, which is the button component itself. The completed sync was not the loop. Renderer resident memory during reproduction was approximately 230 MB; this establishes a CPU/microtask loop, not a demonstrated unbounded memory leak.
+
+Cleanup now explicitly discards component return values. A regression test uses an Obsidian-style thenable component to verify successful and failed operations reset the button without promise assimilation. `npm run check` covers 104 tests. The private-network integration test is unchanged. Real desktop revalidation passed: Full reconciliation returned to Synced with Drive, re-enabled its button, and the modal closed normally. The renderer returned to 0.0% CPU and approximately 170 MB RSS in the post-check sample. No note content was changed for this check.

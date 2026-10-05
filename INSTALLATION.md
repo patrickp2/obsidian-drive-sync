@@ -2,7 +2,7 @@
 
 Drive Sync uses the Google Drive API on both desktop and iPhone. Each device has its own local Obsidian vault, and Drive stores ordinary Markdown files in one dedicated folder. No hosted token broker or pairing service is required.
 
-**0.6.0 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
+**0.6.1 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
 
 ## Setup at a glance
 
@@ -26,7 +26,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
    https://github.com/patrickp2/obsidian-drive-sync
    ```
 
-5. Select **Latest version** (currently **0.6.0**) and enable Drive Sync. Keep BRAT’s **Auto-update plugins at startup** enabled. If BRAT does not list it immediately, refresh its release list. This setup requires 0.5.0 or newer.
+5. Select **Latest version** (currently **0.6.1**) and enable Drive Sync. Keep BRAT’s **Auto-update plugins at startup** enabled. If BRAT does not list it immediately, refresh its release list. This setup requires 0.5.0 or newer.
 
 A GitHub account or personal access token is normally unnecessary for this public repository. If GitHub rate-limits BRAT, wait and retry. Plugins are installed per vault and per device. See [BRAT's guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md).
 
@@ -58,7 +58,7 @@ The Google token can access all Drive files. Folder restrictions are enforced in
 
 1. Install/update Obsidian. Create an empty local test vault with **Store in iCloud** off.
 2. Install and enable BRAT through **Settings → Community plugins**.
-3. In BRAT, add the same repository and select **Latest version** (currently **0.6.0**), with BRAT’s **Auto-update plugins at startup** enabled. Enable Drive Sync.
+3. In BRAT, add the same repository and select **Latest version** (currently **0.6.1**), with BRAT’s **Auto-update plugins at startup** enabled. Enable Drive Sync.
 4. Put the Mac and phone on the same private local network. Keep desktop Obsidian open.
 5. On desktop, open **Settings → Drive Sync → Add device**. A three-minute QR invitation appears.
 6. On the phone, choose **Connect to existing device → Scan QR**. Scan the desktop QR, then choose **Approve device** on the Mac. Check the displayed desktop and local vault names, then tap **Connect this vault**. All phone steps stay in one panel. **Take QR photo** is available if the live camera is unsupported; a one-time invitation paste is under the alternative options. No individual client fields need to be copied.
@@ -130,7 +130,7 @@ Disconnect attempts Google grant revocation and can require other devices using 
 
 See [FEASIBILITY.md](FEASIBILITY.md) for evidence and remaining limits, and [DEVELOPMENT.md](DEVELOPMENT.md) for building and testing.
 
-## Nearby notifications in 0.6.0
+## Nearby notifications in 0.6.1
 
 After updating both devices, existing pairs need **Add device → Connect to existing device** once more to exchange the nearby notification key. A device already signed in keeps its own Google grant; another OAuth flow is not required. Normal Drive sync works before re-pairing, with the 60-second heartbeat.
 
