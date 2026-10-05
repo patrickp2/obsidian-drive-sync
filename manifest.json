@@ -1,7 +1,7 @@
 {
   "id": "drive-sync",
   "name": "Drive Sync",
-  "version": "0.5.2",
+  "version": "0.6.0",
   "minAppVersion": "1.12.7",
   "description": "Sync notes and attachments with your own Google Drive project. Development beta: test vaults only.",
   "author": "Patrick Peters",

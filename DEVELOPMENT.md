@@ -9,7 +9,7 @@ npm run check
 
 The build generates `dist/drive-sync/main.js`, `manifest.json`, and `styles.css`, plus `docs/index.html` with its exact callback CSP hash. Only the three plugin assets go into a disposable vault's `.obsidian/plugins/drive-sync/`. Do not copy local settings or tokens. The callback is published from `docs/`; building locally does not publish it.
 
-See [INSTALLATION.md](INSTALLATION.md) for the current desktop/phone setup. Runtime credentials are never bundled. The QR encoder is a bundled MIT dependency; Obsidian and desktop Node built-ins remain external. The temporary local pairing listener is loaded only on desktop.
+See [INSTALLATION.md](INSTALLATION.md) for the current desktop/phone setup. Runtime credentials are never bundled. The QR encoder is a bundled MIT dependency; Obsidian and desktop Node built-ins remain external. The temporary pairing listener and the separate authenticated nearby-notification listener are loaded only on desktop.
 
 ## Test layers
 
@@ -124,3 +124,13 @@ All three desktop vaults remain enabled with separate Drive roots and identities
 
 
 The scheduled soak was paused on 4 October 2026 after the user chose normal use and issue reporting. Its initial batch and first repeated-edit round passed; no multi-day pass is claimed. Normal plugin sync remains enabled.
+
+## 0.6.0 validation
+
+`npm run check` covers 103 synthetic-data tests: paginated change-feed staging, cursor loss and rebuild, external additions, moved-out files, duplicate paths, failed index checkpoints, local cache invalidation and in-flight read races, forced reconciliation, remote-version precedence and preserved conflicts, plus the previous authentication and file-operation suite.
+
+`npm run test:nearby` is a separate integration test requiring a private IPv4 interface and permission to bind a temporary LAN listener. It uses synthetic keys and notifications, closes the listener afterward, and makes no Google requests. It verifies both notification directions, nonce replay rejection, wrong-key and wrong-vault rejection, and consecutive notifications. It passed on the development Mac. The default test suite remains usable without LAN access.
+
+Runtime indexes are separate from the baseline: `remote-index.json` checkpoints the remote tree and change cursor together; a missing or damaged cache forces a fresh scan. Local fingerprints are memory-only and are cleared on resume/full reconciliation. Neither cache replaces guarded writes or the recovery journal. An unchanged vault still enumerates local paths/metadata in memory; it no longer reads every file’s contents or recursively lists every Drive folder on each heartbeat.
+
+Release validation must distinguish these automated results from checks performed through Obsidian and iPhone Mirroring. Existing Google grants remain local; old pairs continue using the heartbeat until re-paired for nearby hints.

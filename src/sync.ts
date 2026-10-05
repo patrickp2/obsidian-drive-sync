@@ -27,6 +27,7 @@ export interface RemoteStore {
 export interface LocalStore {
   list(): Promise<string[]>;
   read(path: string): Promise<Content | null>;
+  unchanged?(path: string, hash: string): boolean;
   move?(path: string, destination: string, expected: Content): Promise<boolean>;
   trash?(path: string, expected: Content): Promise<boolean>;
   replace(path: string, expected: Content | null, content: Content): Promise<boolean>;
@@ -37,7 +38,7 @@ export class SyncEngine {
   private running: Promise<SyncResult> | null = null;
   private stopped = false;
   constructor(private readonly local: LocalStore, private readonly remote: RemoteStore,
-    readonly state: SyncState, private readonly save: () => Promise<void>) {}
+    readonly state: SyncState, private readonly save: () => Promise<void>, private readonly verifyAll = false) {}
   stop(): void { this.stopped = true; }
   run(): Promise<SyncResult> {
     if (this.running) return this.running;
@@ -129,13 +130,15 @@ export class SyncEngine {
     for (const path of paths) {
       this.alive();
       if (blocked.has(path)) continue;
-      const local = await this.local.read(path);
       const remote = byPath.get(path);
+      const base = this.state.baseline[path];
+      if (!this.verifyAll && base?.id === remote?.id && remote?.version && base?.version === remote.version &&
+          !this.state.deleted[path] && !this.state.pendingCreates[path] && this.local.unchanged?.(path, base.hash)) continue;
+      const local = await this.local.read(path);
       // Rename events can arrive after the initial listing/reconciliation.
       // Never download an intermediate destination as an unrelated new file.
       if (Object.entries(this.state.renames ?? {}).some(([source, target]) =>
         target === path || (this.state.baseline[source] && (source === path || this.state.baseline[source]!.id === remote?.id)))) continue;
-      const base = this.state.baseline[path];
       if (!remote) {
         if (base) {
           // A 404, lost permission, or move outside the root is never deletion evidence.
@@ -170,7 +173,7 @@ export class SyncEngine {
         if (await this.local.read(path) !== null) delete this.state.deleted[path];
         await this.save(); result.uploaded++; continue;
       }
-      if (base?.id === remote.id && remote.version && base.version === remote.version && local !== null && await fingerprint(local) === base.hash) continue;
+      if (!this.verifyAll && base?.id === remote.id && remote.version && base.version === remote.version && local !== null && await fingerprint(local) === base.hash) continue;
       const snapshot = await this.remote.read(remote);
       this.alive();
       const remoteHash = await fingerprint(snapshot.content);
@@ -195,6 +198,8 @@ export class SyncEngine {
       }
       const localHash = await fingerprint(local);
       if (localHash === remoteHash) {
+        if (base?.id === remote.id && base.hash === remoteHash && base.version === snapshot.version &&
+            !this.state.pendingCreates[path] && !this.state.deleted[path]) continue;
         this.state.baseline[path] = { id: remote.id, hash: remoteHash, version: snapshot.version };
         delete this.state.pendingCreates[path];
         if (await this.local.read(path) !== null) delete this.state.deleted[path]; await this.save(); continue;

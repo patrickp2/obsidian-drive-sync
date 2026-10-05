@@ -1,6 +1,7 @@
 import { bytes, markdown, mimeType, MAX_FILE_BYTES, type Content } from './content';
 import { StaleWrite, syncPath, type RemoteFile, type RemoteRead, type RemoteStore } from './sync';
 import type { ProbeRequest, ProbeResponse, ProbeTransport } from './drive-probe';
+import { advanceIndex, startCursor, type DriveIndex } from './drive-index';
 const API = 'https://www.googleapis.com/drive/v3/files';
 const V2 = 'https://www.googleapis.com/drive/v2/files';
 const FOLDER = 'application/vnd.google-apps.folder';
@@ -25,7 +26,8 @@ function identifier(value: unknown): string {
 }
 export class DriveStore implements RemoteStore {
   private folders = new Map<string, string>();
-  constructor(private readonly send: ProbeTransport, readonly folderId: string) { identifier(folderId); this.folders.set('', folderId); }
+  constructor(private readonly send: ProbeTransport, readonly folderId: string,
+    private readonly index?: { current?: DriveIndex; commit: (value: DriveIndex) => Promise<void>; rebuild?: boolean }) { identifier(folderId); this.folders.set('', folderId); }
   static async createFolder(send: ProbeTransport, name: string, id: string): Promise<string> {
     const response = await send({ url: API, method: 'POST', contentType: 'application/json',
       body: JSON.stringify({ id: identifier(id), name, mimeType: FOLDER, appProperties: { driveSyncRoot: '1' } }) });
@@ -76,6 +78,16 @@ export class DriveStore implements RemoteStore {
   }
   async list(): Promise<RemoteFile[]> {
     await this.verifyRoot();
+    if (this.index?.current && !this.index.rebuild) {
+      const next = await advanceIndex(this.send, this.index.current);
+      if (next) {
+        this.folders = new Map(Object.entries(next.folders));
+        await this.index.commit(next);
+        return next.files.map(({ parent: _parent, ...file }) => file);
+      }
+    }
+    // Capture before scanning: changes during a multi-page scan must be replayed.
+    const cursor = this.index ? await startCursor(this.send) : undefined;
     this.folders = new Map([['', this.folderId]]);
     const result: RemoteFile[] = []; const seenFolders = new Set<string>();
     const walk = async (folder: string, prefix: string) => {
@@ -101,7 +113,13 @@ export class DriveStore implements RemoteStore {
         pages.add(page);
       } while (page);
     };
-    await walk(this.folderId, ''); return result;
+    await walk(this.folderId, '');
+    if (this.index && cursor) {
+      const staged: DriveIndex = { format: 1, folderId: this.folderId, cursor, folders: Object.fromEntries(this.folders),
+        files: result.map(file => ({ ...file, parent: this.folders.get(file.path.includes('/') ? file.path.slice(0, file.path.lastIndexOf('/')) : '')! })) };
+      await this.index.commit(staged);
+    }
+    return result;
   }
   private async metadata(file: RemoteFile): Promise<{ etag: string; version?: string }> {
     const data = object(await this.request({ url: `${V2}/${identifier(file.id)}?fields=id,etag,title,labels,parents,fileSize,version`, method: 'GET', headers: { 'Cache-Control': 'no-cache' } }));

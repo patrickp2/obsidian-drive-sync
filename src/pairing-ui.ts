@@ -5,7 +5,7 @@ import { startPairing, type PairingServer } from './pairing-server';
 import { PairingCamera, invitationFromPhoto } from './qr-scanner';
 
 export interface PairingHost {
-  config: () => PairingConfig;
+  config: () => PairingConfig | Promise<PairingConfig>;
   accept: (config: PairingConfig) => Promise<void>;
   connected: () => boolean;
   beginSignIn: () => Promise<string>;
@@ -33,7 +33,7 @@ export class AddDeviceModal extends Modal {
     const status = this.contentEl.createEl('p', { text: 'Preparing invitation…', attr: { role: 'status' } });
     try {
       if (!Platform.isDesktopApp) throw new Error('Start Add device on your desktop.');
-      this.server = await startPairing(this.host.config(), (message, phase) => {
+      this.server = await startPairing(await this.host.config(), (message, phase) => {
         if (this.closed) return;
         if (phase === 'sent' || phase === 'expired') {
           this.contentEl.empty();
@@ -46,7 +46,7 @@ export class AddDeviceModal extends Modal {
         this.approval = resolve;
         this.contentEl.empty();
         this.contentEl.createEl('h3', { text: 'Approve your phone' });
-        this.contentEl.createEl('p', { text: 'Approve only if you just scanned this invitation on your own device. This transfers the Google client configuration and sync folder; each device keeps its own Google tokens.' });
+        this.contentEl.createEl('p', { text: 'Approve only if you just scanned this invitation on your own device. This transfers the Google client configuration, sync folder, and an encrypted key for nearby change notifications. Each device keeps its own Google tokens.' });
         new Setting(this.contentEl).addButton(b => b.setButtonText('Approve device').setCta().onClick(() => {
           b.setDisabled(true); this.approval = undefined; resolve(true);
           this.contentEl.empty(); this.contentEl.createEl('p', { text: 'Sending encrypted configuration…' });

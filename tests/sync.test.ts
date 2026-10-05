@@ -231,3 +231,40 @@ test('deletion while the first upload is in flight is not forgotten', async () =
   await a.engine.run(); assert.equal(a.state.deleted['note.md'], true);
   await a.engine.run(); assert.equal(f.files.size, 0); assert.equal(f.trashed.size, 1);
 });
+
+test('warm fingerprints skip unchanged contents, while full reconciliation detects an otherwise missed edit', async () => {
+  const f = fixture(); const a = f.device(); a.notes.set('note.md', 'baseline'); await a.engine.run();
+  const row = f.files.get('note.md')!;
+  f.remote.list = async () => [{ id: row.id, path: 'note.md', version: String(row.version) }];
+  a.state.baseline['note.md']!.version = String(row.version);
+  let localReads = 0; let remoteReads = 0;
+  const local: LocalStore = {
+    list: async () => [...a.notes.keys()],
+    read: async path => { localReads++; return a.notes.get(path) ?? null; },
+    unchanged: () => true,
+    replace: async (path, expected, value) => { if (!equalContent(a.notes.get(path) ?? null, expected)) return false; a.notes.set(path, value); return true; }
+  };
+  const read = f.remote.read; f.remote.read = async file => { remoteReads++; return read(file); };
+  await new SyncEngine(local, f.remote, a.state, async () => {}).run();
+  assert.equal(localReads, 0); assert.equal(remoteReads, 0);
+  // Simulate a missed local event with unchanged metadata/fingerprint hint.
+  a.notes.set('note.md', 'missed local edit');
+  const result = await new SyncEngine(local, f.remote, a.state, async () => {}, true).run();
+  assert.ok(localReads > 0); assert.ok(remoteReads > 0);
+  assert.equal(result.uploaded, 1); assert.equal(row.content, 'missed local edit');
+});
+test('a changed remote version overrides a warm local fingerprint and preserves both edited branches', async () => {
+  const f = fixture(); const a = f.device(); a.notes.set('note.md', 'baseline'); await a.engine.run();
+  const row = f.files.get('note.md')!; a.state.baseline['note.md']!.version = '1';
+  f.remote.list = async () => [{ id: row.id, path: 'note.md', version: String(row.version) }];
+  row.content = 'remote edit'; row.version++;
+  a.notes.set('note.md', 'local edit');
+  const local: LocalStore = {
+    list: async () => [...a.notes.keys()], read: async path => a.notes.get(path) ?? null,
+    unchanged: () => true,
+    replace: async (path, expected, value) => { if (!equalContent(a.notes.get(path) ?? null, expected)) return false; a.notes.set(path, value); return true; }
+  };
+  const result = await new SyncEngine(local, f.remote, a.state, async () => {}).run();
+  assert.equal(a.notes.get('note.md'), 'remote edit');
+  assert.equal(a.notes.get(result.conflicts[0]!), 'local edit');
+});

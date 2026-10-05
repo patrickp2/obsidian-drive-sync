@@ -4,7 +4,7 @@ import { loadState, recordRename, recordDeletion } from './state';
 import { markdown, MAX_FILE_BYTES } from './content';
 import { localStore } from './local';
 import { recoveryPath, recoveryStorage } from './recovery';
-import { App, MarkdownView, Modal, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting, TFile, requestUrl } from 'obsidian';
+import { App, MarkdownView, Modal, Notice, Platform, Plugin, PluginSettingTab, SecretComponent, Setting, TFile, requestUrl, setIcon } from 'obsidian';
 import { AuthSession, type SecretStore, type Transport } from './auth';
 import { CALLBACK_URL, PROTOCOL_ACTION, parseCallback, parseManualCallback } from './protocol';
 import { runDriveProbe, type ProbeReport, type ProbeTransport } from './drive-probe';
@@ -16,11 +16,19 @@ import { VaultSetup, projectConfig } from './vault-setup';
 import { ReuseVaultSetupModal, approveVaultSetup } from './vault-setup-ui';
 import { TransferBarrier, VALIDATION_MANIFEST, validateFixture } from './validation';
 import { retryRead } from './read-retry';
+import { loadDriveIndex, type DriveIndex } from './drive-index';
+import { LocalIndex } from './local-index';
+import { NearbyClient, validateNearby, type NearbyConfig, type NearbyLink } from './nearby';
+import { startNearbyServer, type NearbyServer } from './nearby-server';
+import { pairingKey } from './pairing';
 import { SyncEngine, syncPath, type SyncState, type LocalStore } from './sync';
 
 interface Settings {
   clientId: string; clientSecretName: string; instanceId: string;
   folderId: string; folderPending: boolean; syncEnabled: boolean; syncState: SyncState;
+  driveIndex?: DriveIndex;
+  nearby?: Omit<NearbyConfig, 'key'>;
+  nearbyHost?: boolean;
 }
 type CheckedStorage = App['secretStorage'] & { isEncryptionAvailable?: () => boolean };
 function secureStore(app: App): SecretStore {
@@ -48,7 +56,8 @@ export default class DriveSyncPlugin extends Plugin {
   lastChecked = '';
   details: string[] = [];
   private statusEl?: HTMLElement;
-  private mobileStatus?: HTMLElement;
+  private ribbonStatus?: HTMLElement;
+  private ribbonIcon = '';
   private listeners = new Set<() => void>();
   private unloaded = false;
   private saveTail: Promise<void> = Promise.resolve();
@@ -62,6 +71,16 @@ export default class DriveSyncPlugin extends Plugin {
   private pairingModal?: ConnectDeviceModal;
   private vaultSetup?: VaultSetup;
   private reuseModal?: ReuseVaultSetupModal;
+  private localIndex!: LocalIndex;
+  private nextCheck = 0;
+  private fullRequested = false;
+  private nearby?: NearbyLink;
+  private nearbyServer?: NearbyServer;
+  private nearbyStarting?: Promise<void>;
+  private nearbyEnabling?: Promise<void>;
+  private nearbyEpoch = 0;
+  private notifyTimer?: number;
+  nearbyMessage = 'Nearby notifications not paired; heartbeat fallback active.';
   readonly validationBarrier = new TransferBarrier(() => this.updateStatus());
   probeReport?: ProbeReport;
   async onload(): Promise<void> {
@@ -72,8 +91,16 @@ export default class DriveSyncPlugin extends Plugin {
       instanceId: typeof saved?.instanceId === 'string' && /^[a-f0-9-]{36}$/.test(saved.instanceId) ? saved.instanceId : crypto.randomUUID(),
       folderId: typeof saved?.folderId === 'string' && /^[A-Za-z0-9_-]+$/.test(saved.folderId) ? saved.folderId : '',
       folderPending: saved?.folderPending === true,
-      syncEnabled: saved?.syncEnabled === true, syncState: loadState(saved?.syncState, saved?.folderId ?? '')
+      syncEnabled: saved?.syncEnabled === true, syncState: loadState(saved?.syncState, saved?.folderId ?? ''),
+      nearby: saved?.nearby ? { address: saved.nearby.address, port: saved.nearby.port, session: saved.nearby.session } : undefined, nearbyHost: saved?.nearbyHost === true
     };
+    try {
+      this.settings.driveIndex = loadDriveIndex(JSON.parse(await this.app.vault.adapter.read(this.indexPath())), this.settings.folderId);
+    } catch { /* An absent or damaged acceleration cache requires a fresh listing. */ }
+    this.localIndex = new LocalIndex(path => {
+      const file = this.app.vault.getAbstractFileByPath(path);
+      return file instanceof TFile ? `${file.stat.mtime}:${file.stat.ctime}:${file.stat.size}` : undefined;
+    });
     await this.saveSettings();
     const secrets = secureStore(this.app);
     this.auth = new AuthSession(secrets, `drive-sync-${this.settings.instanceId}`, transport, () => ({
@@ -90,10 +117,11 @@ export default class DriveSyncPlugin extends Plugin {
         this.register(() => this.vaultSetup?.close());
       }
     }
-    const ribbon = this.addRibbonIcon('cloud', 'Drive Sync status', () => this.showConnection());
-    this.subscribe(() => ribbon.setAttribute('aria-label', `Drive Sync: ${this.syncMessage}`));
+    this.ribbonStatus = this.addRibbonIcon('cloud', 'Drive Sync status', () => this.showConnection());
+    this.ribbonStatus.addClass('drive-sync-ribbon');
     this.addCommand({ id: 'show-connection', name: 'Show sync status', callback: () => this.showConnection() });
     this.addCommand({ id: 'sync-now', name: 'Sync now', callback: () => void this.syncNow() });
+    this.addCommand({ id: 'full-reconciliation', name: 'Full reconciliation', callback: () => void this.syncNow(true) });
     this.addCommand({ id: 'test-drive-edits', name: 'Developer: test disposable Drive files', callback: () => new DriveProbeModal(this.app, this).open() });
     this.addCommand({ id: 'validate-fixture', name: 'Developer: synthetic vault validation', callback: () => new ValidationModal(this.app, this).open() });
     this.registerObsidianProtocolHandler(PROTOCOL_ACTION, params => {
@@ -104,42 +132,52 @@ export default class DriveSyncPlugin extends Plugin {
     });
     this.addSettingTab(new DriveSyncSettings(this.app, this));
     const changed = () => { this.dirty = true; this.schedule(); };
-    this.registerEvent(this.app.vault.on('modify', f => { if (f instanceof TFile && syncPath(f.path)) changed(); }));
-    this.registerEvent(this.app.vault.on('create', f => { if (f instanceof TFile && syncPath(f.path)) changed(); }));
+    this.registerEvent(this.app.vault.on('modify', f => { if (f instanceof TFile && syncPath(f.path)) { this.localIndex.invalidate(f.path); changed(); } }));
+    this.registerEvent(this.app.vault.on('create', f => { if (f instanceof TFile && syncPath(f.path)) { this.localIndex.invalidate(f.path); changed(); } }));
     this.registerEvent(this.app.vault.on('delete', f => {
       if (!syncPath(f.path)) return;
+      this.localIndex.clear();
       recordDeletion(this.settings.syncState, f.path);
       void this.run(() => this.saveSettings(), false); changed();
     }));
     this.registerEvent(this.app.vault.on('rename', (f, old) => {
       if (!syncPath(old) || !syncPath(f.path)) return;
+      this.localIndex.clear();
       recordRename(this.settings.syncState, old, f.path);
       void this.run(() => this.saveSettings(), false); changed();
     }));
-    this.registerInterval(window.setInterval(() => { if (this.settings.syncEnabled) void this.syncNow(); }, 30_000));
-    this.registerDomEvent(document, 'visibilitychange', () => { if (document.visibilityState === 'visible') void this.syncNow(); });
+    this.registerInterval(window.setInterval(() => {
+      if (this.settings.syncEnabled && document.visibilityState === 'visible' && Date.now() >= this.nextCheck) {
+        if (!this.nearby) void this.restartNearby();
+        void this.syncNow();
+      }
+    }, 1000));
+    this.registerDomEvent(document, 'visibilitychange', () => {
+      if (document.visibilityState === 'visible') { this.localIndex.clear(); void this.restartNearby(); void this.syncNow(); }
+      else this.stopNearby();
+    });
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
-      // Mobile rebuilds its workspace during startup, removing earlier children.
-      if (Platform.isMobileApp) {
-        this.mobileStatus = this.app.workspace.containerEl.createEl('button', { cls: 'drive-sync-mobile-status', attr: { 'aria-label': 'Drive Sync status' } });
-        this.registerDomEvent(this.mobileStatus, 'click', () => this.showConnection());
-        this.updateStatus();
-      }
-      void this.run(async () => { await this.auth.restore(); await this.syncNow(); }, false);
+      void this.run(async () => { await this.auth.restore(); await this.restartNearby(); await this.syncNow(); }, false);
     });
     this.updateStatus();
   }
   onunload(): void {
     this.unloaded = true; this.engine?.stop(); this.auth?.stop();
     this.validationBarrier.stop();
+    this.stopNearby();
+    if (this.notifyTimer) window.clearTimeout(this.notifyTimer);
     if (this.timer) window.clearTimeout(this.timer);
-    this.mobileStatus?.remove(); this.listeners.clear();
+    this.listeners.clear();
   }
   saveSettings(): Promise<void> {
-    const snapshot = structuredClone(this.settings);
+    // The tree cache has its own checkpoint file. Do not copy/rewrite a huge
+    // remote index for every individual file's recovery journal checkpoint.
+    const { driveIndex: _index, ...settings } = this.settings;
+    const snapshot = structuredClone(settings);
     const save = this.saveTail.catch(() => {}).then(() => this.saveData(snapshot)); this.saveTail = save; return save;
   }
+  private indexPath(): string { return `${this.app.vault.configDir}/plugins/${this.manifest.id}/remote-index.json`; }
   async run(work: () => Promise<void>, notify = true): Promise<void> {
     try { await work(); } catch (error) {
       if (notify) new Notice(error instanceof Error ? error.message : 'Operation could not be completed.', 9000);
@@ -152,6 +190,76 @@ export default class DriveSyncPlugin extends Plugin {
     if (!this.running) this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : Date.now() < this.retryAt ? 'Sync incomplete · retrying' : 'Changes pending');
     if (this.timer) window.clearTimeout(this.timer);
     this.timer = window.setTimeout(() => { this.timer = undefined; void this.syncNow(); }, Math.max(1500, this.retryAt - Date.now()));
+  }
+  private nearbyChanged = (): void => {
+    if (this.unloaded || !this.settings.syncEnabled) return;
+    // An event during a run must cause a later check; never reset the heartbeat
+    // merely because a notification arrived.
+    if (this.running) { this.dirty = true; return; }
+    void this.syncNow();
+  };
+  private stopNearby(): void {
+    this.nearbyEpoch++; this.nearby?.close(); this.nearby = undefined; this.nearbyServer = undefined;
+    this.nearbyStarting = undefined;
+  }
+  private restartNearby(): Promise<void> {
+    if (this.nearbyStarting) return this.nearbyStarting;
+    if (this.nearby) return Promise.resolve();
+    if (this.unloaded || !this.settings.syncEnabled || !this.settings.nearby || document.visibilityState === 'hidden') return Promise.resolve();
+    const epoch = this.nearbyEpoch;
+    const operation = (async () => {
+      try {
+        const key = secureStore(this.app).get(`drive-nearby-${this.settings.instanceId}`);
+        const config = validateNearby({ ...this.settings.nearby, key });
+        if (this.settings.nearbyHost && Platform.isDesktopApp) {
+          const server = await startNearbyServer(this.settings.folderId, config.key, config.session, config.port, this.nearbyChanged);
+          if (this.unloaded || epoch !== this.nearbyEpoch) { server.close(); return; }
+          this.nearby = this.nearbyServer = server;
+          this.nearbyMessage = 'Nearby listener ready while this vault is open.';
+        } else {
+          const client = new NearbyClient(config, this.settings.folderId, async (url, body) => {
+            const result = await requestUrl({ url, method: 'POST', contentType: 'application/json', body, throw: false });
+            if (result.status !== 200) throw new Error('Nearby device unavailable.');
+            return result.text;
+          }, this.nearbyChanged, connected => {
+            if (this.unloaded || epoch !== this.nearbyEpoch) return;
+            this.nearbyMessage = connected ? 'Nearby desktop connected.' : 'Nearby desktop unavailable; heartbeat fallback active.';
+            this.updateStatus();
+          });
+          this.nearby = client; client.start();
+        }
+      } catch { this.nearbyMessage = 'Nearby connection unavailable; heartbeat fallback active. Pair again if the desktop address changed.'; }
+      if (!this.unloaded && epoch === this.nearbyEpoch) this.updateStatus();
+    })();
+    this.nearbyStarting = operation;
+    void operation.finally(() => { if (this.nearbyStarting === operation) this.nearbyStarting = undefined; });
+    return operation;
+  }
+  private enableNearbyHost(): Promise<void> {
+    if (this.nearbyEnabling) return this.nearbyEnabling;
+    const operation = this.createNearbyHost();
+    this.nearbyEnabling = operation;
+    void operation.finally(() => { if (this.nearbyEnabling === operation) this.nearbyEnabling = undefined; }).catch(() => {});
+    return operation;
+  }
+  private async createNearbyHost(): Promise<void> {
+    if (this.nearbyServer) return;
+    const store = secureStore(this.app); const secretName = `drive-nearby-${this.settings.instanceId}`;
+    if (!this.settings.nearbyHost || !this.settings.nearby || !store.get(secretName)) {
+      this.stopNearby();
+      const epoch = this.nearbyEpoch;
+      const key = pairingKey(); store.set(secretName, key);
+      if (store.get(secretName) !== key) throw new Error('Could not store nearby notification key.');
+      const server = await startNearbyServer(this.settings.folderId, key, crypto.randomUUID(), 0, this.nearbyChanged);
+      if (this.unloaded || epoch !== this.nearbyEpoch) { server.close(); throw new Error('Nearby setup interrupted. Try again.'); }
+      const { key: _key, ...endpoint } = server.config;
+      this.settings.nearby = endpoint; this.settings.nearbyHost = true;
+      try { await this.saveSettings(); } catch (error) { server.close(); throw error; }
+      if (this.unloaded || epoch !== this.nearbyEpoch) { server.close(); throw new Error('Nearby setup interrupted. Try again.'); }
+      this.nearby = this.nearbyServer = server;
+      this.nearbyMessage = 'Nearby listener ready while this vault is open.';
+    } else await this.restartNearby();
+    if (!this.nearbyServer) throw new Error(this.nearbyMessage);
   }
   private driveTransport: ProbeTransport = async request => {
     if (this.unloaded) throw new Error('Plugin unloaded.');
@@ -167,6 +275,10 @@ export default class DriveSyncPlugin extends Plugin {
       response = await send(refreshed);
     }
     await this.validationBarrier.after(request, response.status);
+    if (request.method !== 'GET' && response.status >= 200 && response.status < 300 && this.nearby) {
+      if (this.notifyTimer) window.clearTimeout(this.notifyTimer);
+      this.notifyTimer = window.setTimeout(() => { this.notifyTimer = undefined; this.nearby?.publish(); }, 750);
+    }
     return { status: response.status, headers: response.headers, text: response.text, arrayBuffer: response.arrayBuffer };
   };
   async createSyncFolder(): Promise<void> {
@@ -195,15 +307,16 @@ export default class DriveSyncPlugin extends Plugin {
   }
   async setSyncEnabled(enabled: boolean): Promise<void> {
     this.settings.syncEnabled = enabled;
-    if (!enabled) this.engine?.stop();
+    if (!enabled) { this.engine?.stop(); this.stopNearby(); }
     await this.saveSettings();
+    await this.restartNearby();
     if (enabled) await this.syncNow(); else this.setMessage('Paused');
   }
   private localStore(): LocalStore {
     const recovery = recoveryStorage(this.app.vault.adapter);
     const folders = (path: string) => recovery.folders(path, folder => this.app.vault.createFolder(folder));
     const excluded = (path: string) => path === this.app.vault.configDir || path.startsWith(`${this.app.vault.configDir}/`);
-    return localStore({
+    const store = localStore({
       list: () => this.app.vault.getFiles().map(f => f.path).filter(path => path !== this.app.vault.configDir && !path.startsWith(`${this.app.vault.configDir}/`)),
       read: async path => {
         if (excluded(path)) throw new Error('Obsidian configuration is excluded from sync.');
@@ -237,30 +350,49 @@ export default class DriveSyncPlugin extends Plugin {
       }),
       active: () => !this.unloaded && this.settings.syncEnabled
     });
+    const read = store.read;
+    store.read = path => this.localIndex.read(path, () => read(path));
+    store.unchanged = (path, hash) => this.localIndex.matches(path, hash);
+    return store;
   }
-  syncNow(): Promise<void> {
-    if (this.running) return this.running;
+  syncNow(full = false): Promise<void> {
+    if (full) this.fullRequested = true;
+    if (this.running) return full ? this.running.then(() => this.syncNow()) : this.running;
     if (this.unloaded) return Promise.resolve();
     if (!this.settings.folderId || this.settings.folderPending) { this.setMessage(this.auth.state.status === 'connected' ? 'Connected · choose a sync folder' : 'Connect Google to begin'); return Promise.resolve(); }
     if (!this.settings.syncEnabled) { this.setMessage('Paused'); return Promise.resolve(); }
     if (Date.now() < this.retryAt) { this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : 'Sync incomplete · retrying'); return Promise.resolve(); }
-    this.dirty = false; this.setMessage('Syncing…');
+    const verifyAll = this.fullRequested; this.fullRequested = false;
+    if (verifyAll) this.localIndex.clear();
+    this.dirty = false; this.setMessage(verifyAll ? 'Full reconciliation…' : 'Syncing…');
     if (this.settings.syncState.folderId && this.settings.syncState.folderId !== this.settings.folderId) { this.setMessage('Sync folder does not match this vault’s saved state'); return Promise.resolve(); }
     this.settings.syncState.folderId = this.settings.folderId;
-    const engine = new SyncEngine(this.localStore(), new DriveStore(this.driveTransport, this.settings.folderId), this.settings.syncState, () => this.saveSettings());
+    const remote = new DriveStore(this.driveTransport, this.settings.folderId, {
+      current: this.settings.driveIndex, rebuild: verifyAll,
+      commit: async index => {
+        // Cursor and snapshot are one record; interrupted writes rebuild safely.
+        await this.app.vault.adapter.write(this.indexPath(), JSON.stringify(index));
+        this.settings.driveIndex = index;
+      }
+    });
+    const engine = new SyncEngine(this.localStore(), remote, this.settings.syncState, () => this.saveSettings(), verifyAll);
     this.engine = engine;
     const run = (async () => {
       try {
         const result = await engine.run();
         this.failures = 0; this.retryAt = 0;
+        this.nextCheck = Date.now() + 60_000;
+        if (result.downloaded > 0) this.nearby?.publish();
         if (this.unloaded || !this.settings.syncEnabled) return;
         this.details = [...result.pending, ...result.conflicts.map(path => `Preserved conflict: ${path}`)];
         this.lastChecked = new Date().toLocaleTimeString();
         this.setMessage(result.pending.length ? `${result.pending.length} items need attention` : result.conflicts.length ? 'Conflicts preserved' : this.dirty ? 'Checking new changes…' : 'Synced with Drive');
         if (result.conflicts.length) new Notice('Drive Sync preserved both edits in conflict copies.', 8000);
       } catch (error) {
+        if (verifyAll) this.fullRequested = true;
         if (!this.unloaded && this.settings.syncEnabled) {
           this.retryAt = Date.now() + Math.min(300_000, 30_000 * 2 ** Math.min(this.failures++, 4));
+          this.nextCheck = this.retryAt;
           this.details = [error instanceof Error ? error.message : 'Request failed; retrying.'];
           this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : 'Sync incomplete · retrying');
         }
@@ -272,9 +404,10 @@ export default class DriveSyncPlugin extends Plugin {
   }
   pairingHost(): PairingHost {
     return {
-      config: () => {
+      config: async () => {
         if (!this.settings.folderId || this.settings.folderPending) throw new Error('Choose the desktop sync folder before adding a device.');
-        return validateConfig({ clientId: this.settings.clientId, clientSecret: secureStore(this.app).get(this.settings.clientSecretName), folderId: this.settings.folderId, vaultName: this.app.vault.getName() });
+        await this.enableNearbyHost();
+        return validateConfig({ clientId: this.settings.clientId, clientSecret: secureStore(this.app).get(this.settings.clientSecretName), folderId: this.settings.folderId, vaultName: this.app.vault.getName(), nearby: this.nearbyServer?.config });
       },
       accept: async config => {
         if (this.settings.clientId && this.settings.clientId !== config.clientId) throw new Error('This vault uses a different Google client. Use an empty test vault to pair it.');
@@ -285,7 +418,16 @@ export default class DriveSyncPlugin extends Plugin {
         if (store.get(key) !== config.clientSecret) throw new Error('Could not store paired configuration.');
         this.settings.clientId = config.clientId; this.settings.clientSecretName = key;
         this.settings.folderId = config.folderId; this.settings.folderPending = false; this.settings.syncEnabled = true;
+        if (config.nearby) {
+          const peer = validateNearby(config.nearby);
+          this.stopNearby();
+          store.set(`drive-nearby-${this.settings.instanceId}`, peer.key);
+          if (store.get(`drive-nearby-${this.settings.instanceId}`) !== peer.key) throw new Error('Could not store nearby notification key.');
+          const { key: _key, ...endpoint } = peer;
+          this.settings.nearby = endpoint; this.settings.nearbyHost = false;
+        }
         await this.saveSettings();
+        await this.restartNearby();
         if (this.auth.state.status === 'connected') void this.syncNow();
         else this.setMessage('Configuration received · sign in to Google');
       },
@@ -343,7 +485,14 @@ export default class DriveSyncPlugin extends Plugin {
   private updateStatus(): void {
     if (!this.auth) return;
     this.statusEl?.setText(`Drive: ${this.syncMessage}`);
-    this.mobileStatus?.setText(`Drive: ${this.syncMessage}`);
+    if (this.ribbonStatus) {
+      const attention = this.auth.state.status === 'needs-reconnect' || this.retryAt > 0 || this.details.length > 0 || this.syncMessage === 'Sync folder does not match this vault’s saved state';
+      const busy = ['Syncing…', 'Full reconciliation…', 'Changes pending', 'Checking new changes…'].includes(this.syncMessage);
+      const icon = attention ? 'cloud-alert' : this.syncMessage === 'Paused' ? 'pause' : busy ? 'refresh-cw' : 'cloud';
+      if (icon !== this.ribbonIcon) { setIcon(this.ribbonStatus, icon); this.ribbonIcon = icon; }
+      this.ribbonStatus.toggleClass('drive-sync-needs-attention', attention);
+      this.ribbonStatus.setAttribute('aria-label', `Drive Sync: ${this.syncMessage}. Show sync status`);
+    }
     for (const listener of [...this.listeners]) listener();
   }
 }
@@ -363,7 +512,7 @@ class ConnectionModal extends Modal {
     this.setTitle(`Drive Sync · ${this.app.vault.getName()}`);
     const status = this.contentEl.createEl('p', { attr: { role: 'status', 'aria-live': 'polite' } });
     const details = this.contentEl.createEl('pre'); details.style.whiteSpace = 'pre-wrap';
-    const render = () => { status.setText(this.plugin.syncMessage); details.setText([this.plugin.auth.state.message, this.plugin.lastChecked ? `Last completed check: ${this.plugin.lastChecked}` : '', ...this.plugin.details].filter(Boolean).join('\n')); };
+    const render = () => { status.setText(this.plugin.syncMessage); details.setText([this.plugin.auth.state.message, this.plugin.lastChecked ? `Last completed check: ${this.plugin.lastChecked}` : '', this.plugin.nearbyMessage, ...this.plugin.details].filter(Boolean).join('\n')); };
     render(); this.unsubscribe = this.plugin.subscribe(render);
     new Setting(this.contentEl).addButton(b => b.setButtonText('Sync now').setCta().onClick(() => void this.plugin.syncNow()))
       .addButton(b => b.setButtonText(this.plugin.settings.syncEnabled ? 'Pause' : 'Resume').onClick(() => void this.plugin.run(async () => {
@@ -371,6 +520,10 @@ class ConnectionModal extends Modal {
       })));
     this.contentEl.createEl('p', { text: 'Syncs notes and attachments up to 20 MB per file. Removals go to Drive trash or this vault’s .trash/drive-sync folder. Lost access never triggers deletion.' });
     const advanced = this.contentEl.createEl('details'); advanced.createEl('summary', { text: 'Connection and diagnostics' });
+    new Setting(advanced).setName('Full reconciliation').setDesc('Recovery check: rebuilds indexes and reads every file on both sides. Existing conflict copies and deletion protections remain in effect; large vaults can take time.')
+      .addButton(b => b.setButtonText('Full reconciliation').onClick(() => {
+        b.setDisabled(true); void this.plugin.syncNow(true).finally(() => b.setDisabled(false));
+      }));
     new Setting(advanced).addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())))
       .addButton(b => b.setButtonText('Test refresh').onClick(() => void this.plugin.run(() => this.plugin.auth.refresh())));
     new Setting(advanced).addButton(b => b.setButtonText('Paste return link').onClick(() => { this.close(); new ReturnLinkModal(this.app, this.plugin).open(); }))
@@ -412,9 +565,10 @@ class DriveSyncSettings extends PluginSettingTab {
       .addButton(b => b.setButtonText('Create sync folder').onClick(() => void this.plugin.run(async () => { await this.plugin.createSyncFolder(); this.display(); })));
     if (this.plugin.settings.folderId && !this.plugin.settings.folderPending) {
       new Setting(el).setName(`Google Drive folder · ${this.app.vault.getName()}`).addButton(b => b.setButtonText('Open folder in Drive').onClick(() => window.open(`https://drive.google.com/drive/folders/${this.plugin.settings.folderId}`, '_blank')));
-      new Setting(el).setName('Automatic sync').setDesc('Runs after saved edits, on resume, and every 30 seconds while Obsidian is open.')
+      new Setting(el).setName('Automatic sync').setDesc('Runs after saved edits, nearby device notifications, and on resume. Checks Drive changes after 60 seconds without a successful check.')
         .addToggle(t => t.setValue(this.plugin.settings.syncEnabled).onChange(value => void this.plugin.run(() => this.plugin.setSyncEnabled(value))));
-      if (Platform.isDesktopApp) new Setting(el).setName('Set up your phone').addButton(b => b.setButtonText('Add device').setCta().onClick(() => new AddDeviceModal(this.app, this.plugin.pairingHost()).open()));
+      if (Platform.isDesktopApp) new Setting(el).setName('Set up your phone').setDesc('Pairing also enables an authenticated local-network listener while this vault is open. Existing devices can pair again to enable nearby notifications; Google tokens stay on each device.')
+        .addButton(b => b.setButtonText('Add device').setCta().onClick(() => new AddDeviceModal(this.app, this.plugin.pairingHost()).open()));
     }
     const status = new Setting(el).setName('Sync status').setDesc(this.plugin.syncMessage).addButton(b => b.setButtonText('View details').onClick(() => this.plugin.showConnection()));
     const displayedFolder = this.plugin.settings.folderId;
