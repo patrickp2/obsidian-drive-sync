@@ -1,14 +1,13 @@
 {
   "name": "obsidian-drive-sync",
-  "version": "0.6.1",
+  "version": "1.0.0",
   "private": true,
-  "description": "Google Drive vault sync beta with guarded writes and local device pairing",
+  "description": "Google Drive vault sync with guarded writes and local device pairing",
   "scripts": {
     "build": "npm run typecheck && node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "node --import tsx --test tests/*.test.ts",
-    "check": "npm run build && npm run test",
-    "test:nearby": "node --import tsx --test tests/integration/nearby-network.test.ts"
+    "check": "npm run build && npm run test"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

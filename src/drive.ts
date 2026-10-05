@@ -91,7 +91,7 @@ export class DriveStore implements RemoteStore {
     this.folders = new Map([['', this.folderId]]);
     const result: RemoteFile[] = []; const seenFolders = new Set<string>();
     const walk = async (folder: string, prefix: string) => {
-      if (seenFolders.has(folder) || seenFolders.size > 1000) throw new Error('Drive folder structure is invalid or too large for this beta.');
+      if (seenFolders.has(folder) || seenFolders.size > 1000) throw new Error('Drive folder structure is invalid or exceeds the 1,000-folder limit.');
       seenFolders.add(folder);
       const names = new Set<string>(); let page = ''; const pages = new Set<string>();
       do {

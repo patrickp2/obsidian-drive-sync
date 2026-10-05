@@ -2,7 +2,7 @@
 
 Drive Sync uses the Google Drive API on both desktop and iPhone. Each device has its own local Obsidian vault, and Drive stores ordinary Markdown files in one dedicated folder. No hosted token broker or pairing service is required.
 
-**0.6.1 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
+**Current release: 1.0.0.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
 
 ## Setup at a glance
 
@@ -18,7 +18,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
 ## Desktop installation
 
 1. Install or update Obsidian; the plugin requires **1.12.7 or newer** and encrypted Keychain availability.
-2. Create a new, empty local vault for testing.
+2. Create a new, empty local vault.
 3. Open **Settings → Community plugins**, enable community plugins, select **Browse**, and install/enable **BRAT**.
 4. In BRAT settings, select **Add beta plugin** and enter:
 
@@ -26,7 +26,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
    https://github.com/patrickp2/obsidian-drive-sync
    ```
 
-5. Select **Latest version** (currently **0.6.1**) and enable Drive Sync. Keep BRAT’s **Auto-update plugins at startup** enabled. If BRAT does not list it immediately, refresh its release list. This setup requires 0.5.0 or newer.
+5. Select **Latest version** (currently **1.0.0**) and enable Drive Sync. Keep BRAT’s **Auto-update plugins at startup** enabled. If BRAT does not list it immediately, refresh its release list.
 
 A GitHub account or personal access token is normally unnecessary for this public repository. If GitHub rate-limits BRAT, wait and retry. Plugins are installed per vault and per device. See [BRAT's guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md).
 
@@ -56,9 +56,9 @@ The Google token can access all Drive files. Folder restrictions are enforced in
 
 ## Install and pair iPhone
 
-1. Install/update Obsidian. Create an empty local test vault with **Store in iCloud** off.
+1. Install/update Obsidian. Create an empty local vault with **Store in iCloud** off.
 2. Install and enable BRAT through **Settings → Community plugins**.
-3. In BRAT, add the same repository and select **Latest version** (currently **0.6.1**), with BRAT’s **Auto-update plugins at startup** enabled. Enable Drive Sync.
+3. In BRAT, add the same repository and select **Latest version** (currently **1.0.0**), with BRAT’s **Auto-update plugins at startup** enabled. Enable Drive Sync.
 4. Put the Mac and phone on the same private local network. Keep desktop Obsidian open.
 5. On desktop, open **Settings → Drive Sync → Add device**. A three-minute QR invitation appears.
 6. On the phone, choose **Connect to existing device → Scan QR**. Scan the desktop QR, then choose **Approve device** on the Mac. Check the displayed desktop and local vault names, then tap **Connect this vault**. All phone steps stay in one panel. **Take QR photo** is available if the live camera is unsupported; a one-time invitation paste is under the alternative options. No individual client fields need to be copied.
@@ -66,23 +66,29 @@ The Google token can access all Drive files. Folder restrictions are enforced in
 8. Continue through the Google step in the same panel. Sign into the same Google account and return to Obsidian. Devices already signed in skip this step. Choose **Done** at Setup complete.
 9. Wait for **Synced with Drive**. Create a synthetic note on desktop, verify it arrives on the phone, edit it on the phone, and verify the edit returns to desktop before using any important data.
 
-Encrypted pairing, configuration storage, and initial sync passed on the real iPhone with the external Camera handoff in 0.2.0. The 0.2.1 in-app live camera scan and step flow also passed on the real iPhone; after completion its connection and Synced with Drive status were verified. Its invitation contains a temporary pairing key, not Google credentials. Keep the QR/link private. Configuration is encrypted before crossing the local network; the listener expires after three minutes or when the desktop panel closes. Access/refresh tokens are never transferred. Closing the panel before completion cancels pairing.
+The invitation contains a temporary pairing key, not Google credentials. Keep the QR/link private. Configuration is encrypted before crossing the local network; the listener expires after three minutes or when the desktop panel closes. Access/refresh tokens are never transferred. Closing the panel before completion cancels pairing. Once paired, each device syncs directly with Drive and can use a different network.
 
 ## Everyday use
 
-Edit local notes and attachments normally. Automatic checks run after saved edits, when Obsidian resumes, after authenticated nearby-device notifications, and 60 seconds after the last successful check while Obsidian is active. Event-triggered checks reset the heartbeat only after a successful check. Normal checks consume Drive’s change feed from a saved cursor; they do not recursively list every folder or download every file. Local content fingerprints avoid rereading unchanged files after the cache warms. Resume clears the local fingerprint cache.
+Edit local notes and attachments normally. Saved edits upload after a 1.5-second debounce. Opening Obsidian, returning to it, or regaining connectivity triggers an immediate delta check. After each successful sync, one timer schedules another check 60 seconds later, only while the app is active and online. A successful edit sync resets that countdown. No Firebase, webhook, Tailscale, or nearby notification listener is used.
+
+Normal checks consume Drive’s change feed from a saved cursor; unchanged vaults do not recursively list every folder or download every file. Local fingerprints avoid rereading unchanged file contents after the cache warms. Resume clears those local fingerprints. Remote edits can take roughly a minute to appear while both devices remain open; **Sync now** checks immediately.
 
 Routine sync does not cover the editor with a floating button. Desktop keeps its status-bar item; the Drive Sync ribbon icon shows activity or a warning. Tap it, or run **Drive Sync: Show sync status**, for details, **Sync now**, or **Pause**. Conflicts still produce a notice.
 
-**Full reconciliation**, under **Connection and diagnostics** or in the command palette, rebuilds the remote index and reads every file on both sides, bypassing content caches. Use it as a recovery check when something appears missing or an event was missed. It preserves the existing conflict-copy and recoverable-deletion behavior. Folder structure changes and expired cursors also trigger a fresh folder listing automatically. A full check takes longer on large vaults.
+**Full reconciliation**, under **Connection and diagnostics** or in the command palette, rebuilds the remote index and reads every file on both sides, bypassing content caches. Use it as a recovery check when something appears missing or the plugin reports **Full reconciliation required**. It preserves the existing conflict-copy and recoverable-deletion behavior. Folder structure changes refresh folder metadata automatically. An expired cursor or damaged index for an established vault requires the manual reconciliation button; normal sync does not silently run a full recovery scan. Initial setup builds the first index automatically. A full check takes longer on large vaults.
 
 If both devices changed a note, both edits are preserved using an ordinary `name (conflict …).md` copy. Check the details panel when it reports attention is needed. Attachments retain their original extension in conflict copies. An observed local deletion trashes the remote file only if its content still matches the common baseline. A newer remote edit is restored. Confirmed Drive trash moves unchanged local files into `.trash/drive-sync`; conflicting local edits are preserved first. A missing listing entry or lost access never counts as proof of deletion. Moves retain the Drive file ID; occupied destinations require review.
 
 “Synced with Drive” means this device completed its last check. It does not mean another offline device has uploaded its work. iOS can suspend Obsidian in the background; reopening resumes checking. Quitting desktop Obsidian or sleeping the Mac also stops work.
 
+When the device reports offline, automatic Google requests and the sync timer pause. Keep editing normally: files and sync recovery state remain local. The status quietly shows **Offline · changes saved locally**. Returning online or reopening Obsidian checks Drive again and clears network-failure delays; Google error delays and `Retry-After` instructions still apply. A request already sent may finish, but the plugin does not start further automatic requests while offline.
+
+Wi-Fi connectivity does not guarantee internet access. If the device reports online but Google cannot be reached, bounded read retries and increasing retry delays still apply. **Sync now** can deliberately try a connection when the device's offline signal seems stale; this does not turn automatic offline retries back on. Notes that have never downloaded to this device are unavailable offline. If both devices edited the same note offline, the existing conflict handling preserves both versions.
+
 ## More than one vault
 
-Use a **different Drive folder for each logical vault**, for example Work and Personal. Install the plugin in each desktop vault. With the configured vault still open in another Obsidian window on the same computer, choose **Settings → Drive Sync → Reuse Google setup from another vault → Choose vault**. Select the source, compare the displayed code in both vaults, and choose **Approve setup** in the source vault. The receiving vault saves only the Google client configuration in its own Keychain. Sign in separately, then choose or create its own Drive folder. Both vaults need 0.5.0 or newer. No clipboard, QR, shared credential file, or network listener is used for this same-computer transfer. Never copy Google tokens or plugin data.json. On iPhone, create a corresponding local vault, install BRAT and Drive Sync there, and pair it with the matching desktop vault. The pairing panel displays both vault names before connecting.
+Use a **different Drive folder for each logical vault**, for example Work and Personal. Install the plugin in each desktop vault. With the configured vault still open in another Obsidian window on the same computer, choose **Settings → Drive Sync → Reuse Google setup from another vault → Choose vault**. Select the source, compare the displayed code in both vaults, and choose **Approve setup** in the source vault. The receiving vault saves only the Google client configuration in its own Keychain. Sign in separately, then choose or create its own Drive folder. No clipboard, QR, shared credential file, or network listener is used for this same-computer transfer. Never copy Google tokens or plugin data.json. On iPhone, create a corresponding local vault, install BRAT and Drive Sync there, and pair it with the matching desktop vault. The pairing panel displays both vault names before connecting.
 
 Each vault has its own folder ID, baseline, pending changes, and device grant. Do not clone plugin `data.json` between vaults or point unrelated vaults at the same folder. Two vaults connected to the same folder intentionally synchronize the same files. Obsidian only runs plugins for open vaults; closed mobile vaults catch up when opened.
 
@@ -101,7 +107,7 @@ Remote removals remain in Google Drive trash, subject to Google's retention rule
 
 The current limits are 20 MB per file and 1,000 folders per vault. Hidden paths, Obsidian configuration, Google-native documents, and shortcuts are excluded. Duplicate or case/Unicode-colliding names stop the check for review. Empty folders are not synchronized or automatically removed. Rename intent is recorded while the plugin is running; changes made while it was unloaded may produce preserved duplicate paths requiring review.
 
-Failed native read requests get two short retries; continuing failures back off up to five minutes. Unchanged Drive versions avoid repeat content downloads. The automated large-vault test covers 2,000 synthetic files. A real iPhone verified a 259-file, approximately 11.6 MB fixture including two 5 MiB attachments; a repeated-edit round also passed. The scheduled multi-day soak was paused in favor of normal user testing. These checks are not a performance guarantee. Keep both devices on the same release while testing.
+Failed native read requests get two short retries; continuing failures back off up to five minutes. Unchanged Drive versions avoid repeat content downloads. The automated large-vault test covers 2,000 synthetic files. A real iPhone verified a 259-file, approximately 11.6 MB fixture including two 5 MiB attachments; a repeated-edit round also passed. The scheduled multi-day soak was paused in favor of normal user testing. These checks are not a performance guarantee. Keep both devices on the same release.
 
 ## Google Drive for desktop
 
@@ -130,10 +136,6 @@ Disconnect attempts Google grant revocation and can require other devices using 
 
 See [FEASIBILITY.md](FEASIBILITY.md) for evidence and remaining limits, and [DEVELOPMENT.md](DEVELOPMENT.md) for building and testing.
 
-## Nearby notifications in 0.6.1
+## Upgrading to 1.0.0
 
-After updating both devices, existing pairs need **Add device → Connect to existing device** once more to exchange the nearby notification key. A device already signed in keeps its own Google grant; another OAuth flow is not required. Normal Drive sync works before re-pairing, with the 60-second heartbeat.
-
-The Mac runs an authenticated listener bound to its private LAN address while the vault is active. The phone holds an encrypted request open until a change hint arrives, renewing it after 20 seconds when idle. Hints carry no notes or Google tokens; both devices still fetch actual changes from Drive. The nearby key is kept in Obsidian’s encrypted secret storage. No hosted relay is required.
-
-Nearby notifications require a reachable Mac on the same local network. On other networks, when the Mac is unavailable, or while iOS suspends Obsidian, the heartbeat/resume checks provide catch-up. If the Mac’s IP address changes, pair again to update the endpoint. The status panel reports whether the nearby connection is available. Pause sync or close the vault to stop its listener.
+Update Drive Sync through BRAT in every device/vault. Existing Google connections and selected folders remain intact; no re-pairing is needed. Pairing is only for setting up additional devices. The obsolete nearby notification setup is ignored. This release has no dependency on a Firestore project or hosted relay.

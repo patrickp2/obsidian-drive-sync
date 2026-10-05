@@ -22,8 +22,8 @@ test('failed or malformed final page never advances the saved cursor', async () 
     assert.deepEqual(current, initial());
   }
 });
-test('expired cursors and structural folder changes request a full rebuild', async () => {
-  assert.equal(await advanceIndex(async () => reply({}, 410), initial()), undefined);
+test('expired cursors require manual reconciliation; structural changes refresh folder metadata', async () => {
+  await assert.rejects(advanceIndex(async () => reply({}, 410), initial()), /Full reconciliation/);
   for (const change of [{ fileId: 'sub', removed: true }, { fileId: 'root', removed: true }, { fileId: 'new-folder', file: { id: 'new-folder', name: 'Imported', parents: ['root'], mimeType: 'application/vnd.google-apps.folder' } }]) {
     assert.equal(await advanceIndex(async () => reply({ changes: [change], newStartPageToken: 'after' }), initial()), undefined);
   }

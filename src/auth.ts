@@ -1,4 +1,5 @@
 import { CALLBACK_URL, DRIVE_SCOPE, VAULT_ID_PATTERN, type AuthCallback } from './protocol';
+import { RequestCooldown } from './network';
 
 export interface ClientConfig { clientId: string; clientSecret: string }
 export interface SecretStore {
@@ -44,6 +45,7 @@ export class AuthSession {
   private stopped = false;
   private retryAt = 0;
   private retryDelay = 30_000;
+  private networkRetry = false;
   constructor(private readonly secrets: SecretStore, private readonly key: string,
     private readonly transport: Transport, private readonly getClient: () => ClientConfig,
     private readonly changed: (state: AuthState) => void = () => {},
@@ -177,13 +179,14 @@ export class AuthSession {
     this.secrets.set(this.key, value);
     if (this.secrets.get(this.key) !== value) throw new Error('Could not retain the Google connection.');
     this.retryAt = 0;
-    this.retryDelay = 30_000;
+    this.retryDelay = 30_000; this.networkRetry = false;
     this.accessToken = token;
     this.expiresAt = this.now() + data.expires_in * 1000;
     this.publish('connected', previous ? 'Google access refreshed successfully.' : 'Connected to Google.');
   }
   refresh(): Promise<void> {
     if (this.refreshInFlight) return this.refreshInFlight;
+    if (this.now() < this.retryAt) return Promise.reject(new Error('Google access refresh is waiting before retrying.'));
     const operation = this.refreshOnce();
     this.refreshInFlight = operation;
     void operation.finally(() => { if (this.refreshInFlight === operation) this.refreshInFlight = null; }).catch(() => {});
@@ -201,11 +204,13 @@ export class AuthSession {
     }
     const generation = this.generation;
     this.publish('refreshing', 'Refreshing Google access.');
+    let receivedResponse = false;
     try {
       const result = await this.transport(TOKEN_URL, new URLSearchParams({
         client_id: client.clientId, client_secret: client.clientSecret,
         refresh_token: grant.refreshToken, grant_type: 'refresh_token'
       }));
+      receivedResponse = true;
       if (this.stopped || generation !== this.generation) return;
       if (result.status === 400 && object(result.json).error === 'invalid_grant') {
         this.secrets.clear(this.key);
@@ -214,14 +219,19 @@ export class AuthSession {
         return;
       }
       this.accept(result, client.clientId, grant);
-    } catch {
+    } catch (error) {
       if (!this.stopped && generation === this.generation) {
-        this.retryAt = this.now() + this.retryDelay;
+        this.networkRetry = !receivedResponse && !(error instanceof RequestCooldown);
+        this.retryAt = Math.max(this.now() + this.retryDelay, error instanceof RequestCooldown ? error.until : 0);
         this.retryDelay = Math.min(this.retryDelay * 2, 5 * 60_000);
         this.publish('retrying', 'Could not refresh Google access. Retrying automatically.');
       }
       throw new Error('Could not refresh Google access. Check your connection and try again.');
     }
+  }
+  resumeNetwork(): void {
+    if (!this.networkRetry) return;
+    this.retryAt = 0; this.retryDelay = 30_000; this.networkRetry = false;
   }
   async refreshIfNeeded(): Promise<void> {
     if ((this.state.status === 'connected' && this.expiresAt - this.now() < 60_000) ||
@@ -229,7 +239,7 @@ export class AuthSession {
   }
   async tokenForDrive(): Promise<string> {
     if (this.stopped || this.pending || this.exchangeInFlight) throw new Error('Finish connecting Google first.');
-    if (!this.accessToken || this.expiresAt - this.now() < 60_000) await this.refresh();
+    if (this.state.status === 'retrying' || !this.accessToken || this.expiresAt - this.now() < 60_000) await this.refresh();
     if (this.stopped || this.state.status !== 'connected' || !this.accessToken || this.expiresAt <= this.now()) {
       throw new Error('A working Google connection is required.');
     }

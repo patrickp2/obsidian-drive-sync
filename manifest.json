@@ -1,9 +1,9 @@
 {
   "id": "drive-sync",
   "name": "Drive Sync",
-  "version": "0.6.1",
+  "version": "1.0.0",
   "minAppVersion": "1.12.7",
-  "description": "Sync notes and attachments with your own Google Drive project. Development beta: test vaults only.",
+  "description": "Sync notes and attachments through your own Google Drive project, with offline editing and preserved conflicts.",
   "author": "Patrick Peters",
   "authorUrl": "https://github.com/patrickp2",
   "isDesktopOnly": false

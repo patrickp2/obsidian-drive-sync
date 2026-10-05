@@ -46,7 +46,7 @@ export class AddDeviceModal extends Modal {
         this.approval = resolve;
         this.contentEl.empty();
         this.contentEl.createEl('h3', { text: 'Approve your phone' });
-        this.contentEl.createEl('p', { text: 'Approve only if you just scanned this invitation on your own device. This transfers the Google client configuration, sync folder, and an encrypted key for nearby change notifications. Each device keeps its own Google tokens.' });
+        this.contentEl.createEl('p', { text: 'Approve only if you just scanned this invitation on your own device. This transfers the Google client configuration and sync folder. Each device keeps its own Google tokens.' });
         new Setting(this.contentEl).addButton(b => b.setButtonText('Approve device').setCta().onClick(() => {
           b.setDisabled(true); this.approval = undefined; resolve(true);
           this.contentEl.empty(); this.contentEl.createEl('p', { text: 'Sending encrypted configuration…' });

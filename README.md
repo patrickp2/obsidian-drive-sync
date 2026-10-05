@@ -4,7 +4,9 @@ An Obsidian plugin project for automatically syncing local Mac and iPhone/iPad v
 
 The Mac vault will live outside folders managed by Google Drive for desktop or other sync services. After setup, routine synchronization should happen automatically while the vault is open and the device allows execution, with visible pending work and preserved conflicts.
 
-**Status: 0.6.1 development beta. Adds incremental Drive change tracking, cached local fingerprints, a 60-second fallback heartbeat, authenticated nearby notifications, a manual full reconciliation command, and a quieter mobile interface. Existing pairs need one additional pairing to enable nearby notifications; their Google sign-ins are retained. The automated suite has 104 tests plus a private-network integration test. Earlier releases passed Mac/iPhone edit, conflict, attachment, move, deletion, interruption and 259-file checksum checks. Those earlier results do not establish real-device validation of the new notification path. Full Mac restart and production OAuth review remain deferred.**
+**Current release: 1.0.0.** Checks Drive changes on open, resume, and reconnection, then 60 seconds after the last successful sync while the app is active and online. Saved local edits upload after a short debounce. No Firebase, hosted notification service, or nearby-device sync connection is required. Existing users only need to update on each device; Google sign-ins and vault folders are retained.
+
+The automated suite covers incremental sync, offline scheduling, conflict preservation, interrupted transfers, and manual recovery. Earlier Mac/iPhone validation is recorded in [DEVELOPMENT.md](DEVELOPMENT.md). Full Mac restart and production OAuth review remain deferred; this release does not claim those checks are complete.
 
 Start with the [full installation guide](INSTALLATION.md). It covers BRAT on desktop and iPhone, one-time Google project setup, today's per-device sign-in, troubleshooting, and the pairing/automatic-sync flow. Installing the GitHub app is unnecessary.
 
@@ -22,4 +24,4 @@ The plugin and static callback belong in this single public repository. Runtime 
 
 Development happens outside an Obsidian vault. Deploy only compiled plugin artifacts into a disposable test vault during development.
 
-Run `npm ci --ignore-scripts` and `npm run check` to build and test. Plugin artifacts are written to `dist/drive-sync/`. See [development instructions](DEVELOPMENT.md) and [the requirements](REQUIREMENTS.md) before using the prototype.
+Run `npm ci --ignore-scripts` and `npm run check` to build and test. Plugin artifacts are written to `dist/drive-sync/`. See [development instructions](DEVELOPMENT.md) and [the requirements](REQUIREMENTS.md) for implementation details.

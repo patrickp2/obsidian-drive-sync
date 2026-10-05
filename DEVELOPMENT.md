@@ -9,7 +9,7 @@ npm run check
 
 The build generates `dist/drive-sync/main.js`, `manifest.json`, and `styles.css`, plus `docs/index.html` with its exact callback CSP hash. Only the three plugin assets go into a disposable vault's `.obsidian/plugins/drive-sync/`. Do not copy local settings or tokens. The callback is published from `docs/`; building locally does not publish it.
 
-See [INSTALLATION.md](INSTALLATION.md) for the current desktop/phone setup. Runtime credentials are never bundled. The QR encoder is a bundled MIT dependency; Obsidian and desktop Node built-ins remain external. The temporary pairing listener and the separate authenticated nearby-notification listener are loaded only on desktop.
+See [INSTALLATION.md](INSTALLATION.md) for the current desktop/phone setup. Runtime credentials are never bundled. The QR encoder is a bundled MIT dependency; Obsidian and desktop Node built-ins remain external. The temporary pairing listener is loaded only on desktop and only while adding a device. No persistent device or cloud notification listener is used.
 
 ## Test layers
 
@@ -37,9 +37,9 @@ The desktop vault is `test-vaults/drive-sync-auth` (ignored by Git), running Obs
 
 ## Release
 
-Use matching version numbers in package.json, manifest.json, and the release tag. Run checks and credential scanning before publishing. Attach `main.js`, `manifest.json`, and `styles.css` separately to the GitHub prerelease; BRAT downloads those assets. Do not overwrite older release assets. Update both devices through BRAT or copy built artifacts only into the desktop test vault.
+Use matching version numbers in package.json, package-lock.json, manifest.json, and the release tag. Record minimum Obsidian compatibility in versions.json. Run checks and credential scanning before publishing. Attach `main.js`, `manifest.json`, and `styles.css` separately to the GitHub release; BRAT downloads those assets. Do not overwrite older release assets. Update both devices through BRAT or copy built artifacts only into the desktop test vault.
 
-Do not mark the beta production-ready: current limits and remaining gates are in [FEASIBILITY.md](FEASIBILITY.md). Source-level tests do not establish real iOS lifecycle/network behavior. Version 0.3.0 implements attachments and recoverable move/deletion paths. End-to-end folder selection and vault lifecycle tests must pass before claiming those flows verified on both devices.
+Do not claim unperformed validation is complete: current limits and remaining gates are in [FEASIBILITY.md](FEASIBILITY.md). Source-level tests do not establish real iOS lifecycle/network behavior. Version 0.3.0 implements attachments and recoverable move/deletion paths. End-to-end folder selection and vault lifecycle tests must pass before claiming those flows verified on both devices.
 
 ## 0.3.0 validation
 
@@ -151,3 +151,15 @@ Personal on the Mac and iPhone were paired again on 0.6.1; the phone retained it
 - iPhone → desktop: the marker was typed in the phone editor during 20:24:50.836–20:24:51.125 PDT. The desktop file changed at 20:24:58.856 (observed by a 100 ms file watcher at 20:24:58.915): approximately 7.7–8.1 seconds. The desktop editor also displayed the same marker.
 
 These are one real edit in each direction, not a latency guarantee or a load test. Mirroring input/focus interruptions delayed setup; they are excluded from the measurements. An initial clipboard attempt inserted the already-used, expired pairing invitation instead of the marker; keyboard input replaced it before the measured reverse edit. The disposable timing note is removed after validation.
+
+## 1.0.0 — foreground delta polling, 5 October 2026
+
+The release uses no notification relay or persistent nearby listener. Firebase dependencies, relay configuration, nearby sync code, and associated tests were removed. QR pairing remains a temporary encrypted transfer of Google project configuration and folder identity; existing Google grants are retained.
+
+One timeout handles saved-edit debounce (1.5 seconds), failed-operation retry, or the next idle delta check (60 seconds after success). There is no one-second polling loop. Open/resume/online events immediately check the saved Drive cursor. Backgrounding, offline transitions, pause, and unload cancel the timer. Local edits remain on disk while offline; confirmed in-flight operations retain their checkpoint and conflict protections. An edit arriving during a sync queues a later pass instead of overlapping runs.
+
+Drive and OAuth transports honor Retry-After, including a minimum 30-second cooldown for HTTP 429/503. Resume clears only failed-network backoff. A manual check may probe a stale offline hint without restoring automatic offline requests. Reconnect-required grants stop automatic retries.
+
+Expired Drive cursors and missing indexes for established vaults require the manual Full reconciliation action. First setup builds its initial index; structural folder changes still refresh scoped folder metadata as part of normal delta processing. Full reconciliation reads only the selected vault tree, preserves conflicts, and retains deletion guards.
+
+Release validation: `npm run check` passes build, type checking, credential-pattern scanning, and 116 tests. Scheduler tests exercise the actual bundled plugin using synthetic Obsidian/Drive adapters: a full hour of 60-second checks; edit debounce resetting the deadline; offline suppression; background/resume and pause; in-flight edits and recovery; manual probing; Google cooldowns; and manual checkpoint recovery. Existing conflict, uncertain-write, attachment, deletion, and 2,000-file tests remain passing. These are automated results, not a new real-iPhone network/lifecycle test. Earlier real-device evidence above remains applicable to the unchanged file-transfer paths. Full Mac restart, controlled iPhone airplane-mode validation, and production OAuth review remain deferred.

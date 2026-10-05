@@ -221,3 +221,26 @@ test('Drive token access refreshes expiry and refuses a revoked or stopped sessi
   f.session.stop();
   await assert.rejects(f.session.tokenForDrive(), /Finish connecting/);
 });
+
+test('network recovery clears refresh backoff, including a still-valid access token', async () => {
+  const f = fixture(); await authorize(f);
+  f.setHandler(async () => { throw new Error('Connection lost'); });
+  await assert.rejects(f.session.refresh());
+  await assert.rejects(f.session.tokenForDrive(), /waiting/);
+  assert.equal(f.calls.length, 2);
+  f.session.resumeNetwork();
+  f.setHandler(async () => success());
+  assert.equal(await f.session.tokenForDrive(), 'synthetic-access-token');
+  assert.equal(f.calls.length, 3);
+});
+
+test('network recovery does not reset a refresh delay caused by a Google error', async () => {
+  const f = fixture(); await authorize(f); f.advance(3600_000);
+  f.setHandler(async () => ({ status: 503, json: {} }));
+  await assert.rejects(f.session.tokenForDrive());
+  f.session.resumeNetwork();
+  await assert.rejects(f.session.tokenForDrive(), /waiting/);
+  assert.equal(f.calls.length, 2);
+  f.advance(30_000); f.setHandler(async () => success());
+  assert.equal(await f.session.tokenForDrive(), 'synthetic-access-token');
+});

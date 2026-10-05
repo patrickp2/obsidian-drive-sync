@@ -2,6 +2,10 @@ import { syncPath } from './content';
 import type { RemoteFile } from './sync';
 import type { ProbeTransport } from './drive-probe';
 
+export class ReconciliationRequired extends Error {
+  constructor() { super('Drive checkpoint unavailable. Use Full reconciliation to rebuild this vault’s index.'); }
+}
+
 export interface IndexedFile extends RemoteFile { parent: string }
 export interface DriveIndex {
   format: 1; folderId: string; cursor: string;
@@ -53,7 +57,7 @@ export async function advanceIndex(send: ProbeTransport, current: DriveIndex): P
     const query = new URLSearchParams({ pageToken: page, pageSize: '1000', spaces: 'drive', includeRemoved: 'true',
       fields: 'nextPageToken,newStartPageToken,changes(fileId,removed,file(id,name,mimeType,parents,trashed,version))' });
     const r = await send({ url: `${ROOT}changes?${query}`, method: 'GET' });
-    if (r.status === 410) return; // Rebuild, never turn a lost cursor into deletions.
+    if (r.status === 410) throw new ReconciliationRequired();
     if (r.status !== 200) throw new Error(`Could not read Drive changes (HTTP ${r.status}).`);
     const data = JSON.parse(r.text);
     if (!data || !Array.isArray(data.changes)) throw new Error('Incomplete Drive change response.');

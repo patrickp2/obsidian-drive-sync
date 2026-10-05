@@ -1,6 +1,6 @@
 # Feasibility and test evidence
 
-Updated 2026-10-04. The design is API access on both desktop and mobile, with ordinary Markdown files in Google Drive. The user explicitly rejected an immutable revision-record format and a hosted authentication/pairing service.
+Updated 2026-10-05. The design is API access on both desktop and mobile, with ordinary Markdown files in Google Drive. The user explicitly rejected an immutable revision-record format and a hosted authentication/pairing service.
 
 ## Conditional writes: live result
 
@@ -24,7 +24,7 @@ Core tests cover desktop-to-phone-to-desktop edits using two independent simulat
 
 The real desktop test vault `drive-sync-auth` created its dedicated Drive folder and uploaded `README.md` and `Sync test.md` automatically. Further real-device results belong in DEVELOPMENT.md.
 
-Version 0.3.0 adds byte-preserving attachments (20 MB/file), baseline-bound folder identity, persistent rename intent, version-guarded v2 metadata moves/trash, and local recovery copies. A 404 or move outside the configured tree never triggers local deletion. Version comparisons avoid downloads for unchanged content. Version 0.4.0 selects existing folders directly and discovers externally added files using full Drive authorization. Empty folders are not synchronized. Use disposable vaults until broader live tests pass.
+Version 0.3.0 adds byte-preserving attachments (20 MB/file), baseline-bound folder identity, persistent rename intent, version-guarded v2 metadata moves/trash, and local recovery copies. A 404 or move outside the configured tree never triggers local deletion. Version comparisons avoid downloads for unchanged content. Version 0.4.0 selects existing folders directly and discovers externally added files using full Drive authorization. Empty folders are not synchronized. Current release and validation limits are documented in DEVELOPMENT.md.
 
 The same v2 conditional-write probe also passed on the real iPhone in 0.2.1: baseline Unicode round trip, current-ETag write, stale-ETag HTTP 412 with newer content preserved, then successful fresh-ETag write. Its temporary resources were moved to Drive trash.
 
@@ -59,3 +59,7 @@ Remaining gates include full desktop application restart (deferred by the user),
 The Obsidian-hosted probe used the actual DriveStore and requestUrl transport against two synthetic roots. Identical paths remained isolated. Multipart binary creation and replacement preserved all byte values. Stale binary replacement, rename/parent move, and trash each returned HTTP 412. Current rename/move retained the ID and bytes; current trash was confirmed by metadata and absence from a complete listing. The other root was unchanged. All probe resources were moved to Drive trash.
 
 Google Picker API was enabled in the dedicated test project with user approval. No billing account was added. Google currently documents standard Drive API use at no additional cost and planned future charges above included usage thresholds; check the linked limits page before changing billing or quotas.
+
+## 1.0.0 scheduling
+
+The selected release architecture is resume/open/reconnect delta checks plus a 60-second interval after each successful check while active and online. Local saved edits trigger a shorter debounce. No event relay or persistent nearby notification service is shipped. Manual Full reconciliation recovers a lost checkpoint or investigates missing changes. The release designation does not close the deferred validation gates above.

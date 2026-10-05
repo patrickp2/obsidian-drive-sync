@@ -1,3 +1,4 @@
+import { NetworkAccess, OFFLINE_MESSAGE } from './network';
 import { finishUiAction } from './ui-action';
 import { runLifecycleProbe } from './lifecycle-probe';
 import type { AuthCallback } from './protocol';
@@ -17,19 +18,14 @@ import { VaultSetup, projectConfig } from './vault-setup';
 import { ReuseVaultSetupModal, approveVaultSetup } from './vault-setup-ui';
 import { TransferBarrier, VALIDATION_MANIFEST, validateFixture } from './validation';
 import { retryRead } from './read-retry';
-import { loadDriveIndex, type DriveIndex } from './drive-index';
+import { ReconciliationRequired, loadDriveIndex, type DriveIndex } from './drive-index';
 import { LocalIndex } from './local-index';
-import { NearbyClient, validateNearby, type NearbyConfig, type NearbyLink } from './nearby';
-import { startNearbyServer, type NearbyServer } from './nearby-server';
-import { pairingKey } from './pairing';
 import { SyncEngine, syncPath, type SyncState, type LocalStore } from './sync';
 
 interface Settings {
   clientId: string; clientSecretName: string; instanceId: string;
   folderId: string; folderPending: boolean; syncEnabled: boolean; syncState: SyncState;
   driveIndex?: DriveIndex;
-  nearby?: Omit<NearbyConfig, 'key'>;
-  nearbyHost?: boolean;
 }
 type CheckedStorage = App['secretStorage'] & { isEncryptionAvailable?: () => boolean };
 function secureStore(app: App): SecretStore {
@@ -42,14 +38,6 @@ function secureStore(app: App): SecretStore {
   };
   return { get: key => check().getSecret(key), set: (key, value) => check().setSecret(key, value), clear: key => check().setSecret(key, '') };
 }
-const transport: Transport = async (url, body) => {
-  try {
-    const result = await requestUrl({ url, method: 'POST', contentType: 'application/x-www-form-urlencoded', body: body.toString(), throw: false });
-    let json: unknown = {};
-    if (result.text) { try { json = JSON.parse(result.text); } catch { /* Never report provider text. */ } }
-    return { status: result.status, json };
-  } catch { throw new Error('Could not reach Google.'); }
-};
 export default class DriveSyncPlugin extends Plugin {
   declare settings: Settings;
   auth!: AuthSession;
@@ -63,25 +51,24 @@ export default class DriveSyncPlugin extends Plugin {
   private unloaded = false;
   private saveTail: Promise<void> = Promise.resolve();
   private timer?: number;
+  private nextCheck = 0;
   private running?: Promise<void>;
   private dirty = false;
   private retryAt = 0;
   private failures = 0;
+  private retryIsNetwork = false;
+  private recoveryEpoch = 0;
+  private suspensionEpoch = 0;
+  private readonly network = new NetworkAccess(() => navigator.onLine !== false);
+  private wasOffline = false;
   private engine?: SyncEngine;
   private probeRunning = false;
   private pairingModal?: ConnectDeviceModal;
   private vaultSetup?: VaultSetup;
   private reuseModal?: ReuseVaultSetupModal;
   private localIndex!: LocalIndex;
-  private nextCheck = 0;
   private fullRequested = false;
-  private nearby?: NearbyLink;
-  private nearbyServer?: NearbyServer;
-  private nearbyStarting?: Promise<void>;
-  private nearbyEnabling?: Promise<void>;
-  private nearbyEpoch = 0;
-  private notifyTimer?: number;
-  nearbyMessage = 'Nearby notifications not paired; heartbeat fallback active.';
+  private reconciliationRequired = false;
   readonly validationBarrier = new TransferBarrier(() => this.updateStatus());
   probeReport?: ProbeReport;
   async onload(): Promise<void> {
@@ -93,18 +80,17 @@ export default class DriveSyncPlugin extends Plugin {
       folderId: typeof saved?.folderId === 'string' && /^[A-Za-z0-9_-]+$/.test(saved.folderId) ? saved.folderId : '',
       folderPending: saved?.folderPending === true,
       syncEnabled: saved?.syncEnabled === true, syncState: loadState(saved?.syncState, saved?.folderId ?? ''),
-      nearby: saved?.nearby ? { address: saved.nearby.address, port: saved.nearby.port, session: saved.nearby.session } : undefined, nearbyHost: saved?.nearbyHost === true
     };
     try {
       this.settings.driveIndex = loadDriveIndex(JSON.parse(await this.app.vault.adapter.read(this.indexPath())), this.settings.folderId);
-    } catch { /* An absent or damaged acceleration cache requires a fresh listing. */ }
+    } catch { /* First setup builds an index; established vaults request manual recovery. */ }
     this.localIndex = new LocalIndex(path => {
       const file = this.app.vault.getAbstractFileByPath(path);
       return file instanceof TFile ? `${file.stat.mtime}:${file.stat.ctime}:${file.stat.size}` : undefined;
     });
     await this.saveSettings();
     const secrets = secureStore(this.app);
-    this.auth = new AuthSession(secrets, `drive-sync-${this.settings.instanceId}`, transport, () => ({
+    this.auth = new AuthSession(secrets, `drive-sync-${this.settings.instanceId}`, this.authTransport, () => ({
       clientId: this.settings.clientId.trim(), clientSecret: secrets.get(this.settings.clientSecretName) ?? ''
     }), () => this.updateStatus(), Date.now, () => (this.app as App & { appId?: string }).appId);
     if (Platform.isDesktopApp) {
@@ -121,8 +107,8 @@ export default class DriveSyncPlugin extends Plugin {
     this.ribbonStatus = this.addRibbonIcon('cloud', 'Drive Sync status', () => this.showConnection());
     this.ribbonStatus.addClass('drive-sync-ribbon');
     this.addCommand({ id: 'show-connection', name: 'Show sync status', callback: () => this.showConnection() });
-    this.addCommand({ id: 'sync-now', name: 'Sync now', callback: () => void this.syncNow() });
-    this.addCommand({ id: 'full-reconciliation', name: 'Full reconciliation', callback: () => void this.syncNow(true) });
+    this.addCommand({ id: 'sync-now', name: 'Sync now', callback: () => void this.manualSync() });
+    this.addCommand({ id: 'full-reconciliation', name: 'Full reconciliation', callback: () => void this.manualSync(true) });
     this.addCommand({ id: 'test-drive-edits', name: 'Developer: test disposable Drive files', callback: () => new DriveProbeModal(this.app, this).open() });
     this.addCommand({ id: 'validate-fixture', name: 'Developer: synthetic vault validation', callback: () => new ValidationModal(this.app, this).open() });
     this.registerObsidianProtocolHandler(PROTOCOL_ACTION, params => {
@@ -147,27 +133,21 @@ export default class DriveSyncPlugin extends Plugin {
       recordRename(this.settings.syncState, old, f.path);
       void this.run(() => this.saveSettings(), false); changed();
     }));
-    this.registerInterval(window.setInterval(() => {
-      if (this.settings.syncEnabled && document.visibilityState === 'visible' && Date.now() >= this.nextCheck) {
-        if (!this.nearby) void this.restartNearby();
-        void this.syncNow();
-      }
-    }, 1000));
+    this.wasOffline = this.network.offline;
+    this.registerDomEvent(window, 'offline', () => this.connectivityChanged());
+    this.registerDomEvent(window, 'online', () => this.connectivityChanged());
     this.registerDomEvent(document, 'visibilitychange', () => {
-      if (document.visibilityState === 'visible') { this.localIndex.clear(); void this.restartNearby(); void this.syncNow(); }
-      else this.stopNearby();
+      this.visibilityChanged();
     });
     this.app.workspace.onLayoutReady(() => {
       if (this.unloaded) return;
-      void this.run(async () => { await this.auth.restore(); await this.restartNearby(); await this.syncNow(); }, false);
+      void this.run(async () => { await this.auth.restore(); await this.syncNow(); }, false);
     });
     this.updateStatus();
   }
   onunload(): void {
     this.unloaded = true; this.engine?.stop(); this.auth?.stop();
     this.validationBarrier.stop();
-    this.stopNearby();
-    if (this.notifyTimer) window.clearTimeout(this.notifyTimer);
     if (this.timer) window.clearTimeout(this.timer);
     this.listeners.clear();
   }
@@ -186,87 +166,84 @@ export default class DriveSyncPlugin extends Plugin {
     this.updateStatus();
   }
   private setMessage(message: string): void { this.syncMessage = message; this.updateStatus(); }
+  private visibilityChanged(): void {
+    if (document.visibilityState === 'visible') { this.localIndex.clear(); this.resumeNetwork(); }
+    else {
+      this.suspensionEpoch++; this.engine?.stop();
+      if (this.timer) { window.clearTimeout(this.timer); this.timer = undefined; }
+    }
+  }
+  private connectivityChanged(): void {
+    const offline = navigator.onLine === false;
+    if (offline === this.wasOffline) return;
+    this.wasOffline = offline;
+    if (!offline) { this.resumeNetwork(); return; }
+    this.pauseOffline();
+  }
+  private pauseOffline(): void {
+    this.suspensionEpoch++;
+    this.network.suspend(); this.engine?.stop();
+    if (this.timer) { window.clearTimeout(this.timer); this.timer = undefined; }
+    if (this.settings.syncEnabled && this.settings.folderId) this.setMessage(OFFLINE_MESSAGE);
+  }
+  private resumeNetwork(): void {
+    // Sample again on resume in case WebView missed an event while suspended.
+    this.wasOffline = navigator.onLine === false;
+    if (this.wasOffline) { this.pauseOffline(); return; }
+    if (this.unloaded) return;
+    this.recoveryEpoch++;
+    this.clearNetworkRetry();
+    if (document.visibilityState !== 'visible') return;
+    if (this.running) this.dirty = true;
+    else void this.syncNow();
+  }
+  private clearNetworkRetry(): void {
+    this.auth.resumeNetwork();
+    if (this.retryIsNetwork) { this.retryAt = 0; this.failures = 0; this.retryIsNetwork = false; }
+  }
+  async manualSync(full = false): Promise<void> {
+    // An explicit check can test a stale offline hint, but never bypass Google's cooldown.
+    if (this.running) await this.running;
+    if (this.unloaded) return;
+    const finish = this.network.manualProbe();
+    this.clearNetworkRetry();
+    try { await this.syncNow(full); }
+    finally {
+      finish();
+      if (this.network.offline) this.schedule();
+    }
+  }
   private schedule(): void {
-    if (this.unloaded || !this.settings.syncEnabled || !this.settings.folderId) return;
-    if (!this.running) this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : Date.now() < this.retryAt ? 'Sync incomplete · retrying' : 'Changes pending');
-    if (this.timer) window.clearTimeout(this.timer);
-    this.timer = window.setTimeout(() => { this.timer = undefined; void this.syncNow(); }, Math.max(1500, this.retryAt - Date.now()));
+    if (this.timer) { window.clearTimeout(this.timer); this.timer = undefined; }
+    if (this.unloaded || !this.settings.syncEnabled || !this.settings.folderId || this.settings.folderPending ||
+        this.running || document.visibilityState !== 'visible' || (this.reconciliationRequired && !this.fullRequested)) return;
+    if (this.network.offline) { this.setMessage(OFFLINE_MESSAGE); return; }
+    if (this.auth.state.status === 'needs-reconnect') { this.setMessage('Reconnect Google'); return; }
+    const now = Date.now();
+    const due = this.dirty ? now + 1500 : this.nextCheck || now + 60_000;
+    const ready = Math.max(due, this.retryAt, this.network.retryAfter);
+    if (this.dirty) this.setMessage(ready > now + 1500 ? 'Sync incomplete · retrying' : 'Changes pending');
+    // One timer: local edits debounce, otherwise wait 60 seconds after success.
+    // Resume/online perform an immediate check and replace this timer.
+    this.timer = window.setTimeout(() => { this.timer = undefined; void this.syncNow(); }, Math.max(0, ready - now));
   }
-  private nearbyChanged = (): void => {
-    if (this.unloaded || !this.settings.syncEnabled) return;
-    // An event during a run must cause a later check; never reset the heartbeat
-    // merely because a notification arrived.
-    if (this.running) { this.dirty = true; return; }
-    void this.syncNow();
+  private authTransport: Transport = async (url, body) => {
+    const result = await this.network.request(() => requestUrl({ url, method: 'POST', contentType: 'application/x-www-form-urlencoded', body: body.toString(), throw: false }));
+    this.network.observe(result.status, result.headers);
+    let json: unknown = {};
+    if (result.text) { try { json = JSON.parse(result.text); } catch { /* Never report provider text. */ } }
+    return { status: result.status, json };
   };
-  private stopNearby(): void {
-    this.nearbyEpoch++; this.nearby?.close(); this.nearby = undefined; this.nearbyServer = undefined;
-    this.nearbyStarting = undefined;
-  }
-  private restartNearby(): Promise<void> {
-    if (this.nearbyStarting) return this.nearbyStarting;
-    if (this.nearby) return Promise.resolve();
-    if (this.unloaded || !this.settings.syncEnabled || !this.settings.nearby || document.visibilityState === 'hidden') return Promise.resolve();
-    const epoch = this.nearbyEpoch;
-    const operation = (async () => {
-      try {
-        const key = secureStore(this.app).get(`drive-nearby-${this.settings.instanceId}`);
-        const config = validateNearby({ ...this.settings.nearby, key });
-        if (this.settings.nearbyHost && Platform.isDesktopApp) {
-          const server = await startNearbyServer(this.settings.folderId, config.key, config.session, config.port, this.nearbyChanged);
-          if (this.unloaded || epoch !== this.nearbyEpoch) { server.close(); return; }
-          this.nearby = this.nearbyServer = server;
-          this.nearbyMessage = 'Nearby listener ready while this vault is open.';
-        } else {
-          const client = new NearbyClient(config, this.settings.folderId, async (url, body) => {
-            const result = await requestUrl({ url, method: 'POST', contentType: 'application/json', body, throw: false });
-            if (result.status !== 200) throw new Error('Nearby device unavailable.');
-            return result.text;
-          }, this.nearbyChanged, connected => {
-            if (this.unloaded || epoch !== this.nearbyEpoch) return;
-            this.nearbyMessage = connected ? 'Nearby desktop connected.' : 'Nearby desktop unavailable; heartbeat fallback active.';
-            this.updateStatus();
-          });
-          this.nearby = client; client.start();
-        }
-      } catch { this.nearbyMessage = 'Nearby connection unavailable; heartbeat fallback active. Pair again if the desktop address changed.'; }
-      if (!this.unloaded && epoch === this.nearbyEpoch) this.updateStatus();
-    })();
-    this.nearbyStarting = operation;
-    void operation.finally(() => { if (this.nearbyStarting === operation) this.nearbyStarting = undefined; });
-    return operation;
-  }
-  private enableNearbyHost(): Promise<void> {
-    if (this.nearbyEnabling) return this.nearbyEnabling;
-    const operation = this.createNearbyHost();
-    this.nearbyEnabling = operation;
-    void operation.finally(() => { if (this.nearbyEnabling === operation) this.nearbyEnabling = undefined; }).catch(() => {});
-    return operation;
-  }
-  private async createNearbyHost(): Promise<void> {
-    if (this.nearbyServer) return;
-    const store = secureStore(this.app); const secretName = `drive-nearby-${this.settings.instanceId}`;
-    if (!this.settings.nearbyHost || !this.settings.nearby || !store.get(secretName)) {
-      this.stopNearby();
-      const epoch = this.nearbyEpoch;
-      const key = pairingKey(); store.set(secretName, key);
-      if (store.get(secretName) !== key) throw new Error('Could not store nearby notification key.');
-      const server = await startNearbyServer(this.settings.folderId, key, crypto.randomUUID(), 0, this.nearbyChanged);
-      if (this.unloaded || epoch !== this.nearbyEpoch) { server.close(); throw new Error('Nearby setup interrupted. Try again.'); }
-      const { key: _key, ...endpoint } = server.config;
-      this.settings.nearby = endpoint; this.settings.nearbyHost = true;
-      try { await this.saveSettings(); } catch (error) { server.close(); throw error; }
-      if (this.unloaded || epoch !== this.nearbyEpoch) { server.close(); throw new Error('Nearby setup interrupted. Try again.'); }
-      this.nearby = this.nearbyServer = server;
-      this.nearbyMessage = 'Nearby listener ready while this vault is open.';
-    } else await this.restartNearby();
-    if (!this.nearbyServer) throw new Error(this.nearbyMessage);
-  }
   private driveTransport: ProbeTransport = async request => {
     if (this.unloaded) throw new Error('Plugin unloaded.');
+    this.network.assertAvailable();
     const token = await this.auth.tokenForDrive();
     if (this.unloaded) throw new Error('Plugin unloaded.');
-    const send = (accessToken: string) => retryRead(request.method, () => requestUrl({ ...request, headers: { ...request.headers, Authorization: `Bearer ${accessToken}` }, throw: false }), () => !this.unloaded);
+    const send = async (accessToken: string) => {
+      const response = await retryRead(request.method, () => this.network.request(() => requestUrl({ ...request, headers: { ...request.headers, Authorization: `Bearer ${accessToken}` }, throw: false })), () => !this.unloaded && !this.network.offline && Date.now() >= this.network.retryAfter);
+      this.network.observe(response.status, response.headers);
+      return response;
+    };
     let response = await send(token);
     if (response.status === 401) {
       // One refresh/retry only. Invalid grants surface Reconnect; never loop on 401.
@@ -276,10 +253,6 @@ export default class DriveSyncPlugin extends Plugin {
       response = await send(refreshed);
     }
     await this.validationBarrier.after(request, response.status);
-    if (request.method !== 'GET' && response.status >= 200 && response.status < 300 && this.nearby) {
-      if (this.notifyTimer) window.clearTimeout(this.notifyTimer);
-      this.notifyTimer = window.setTimeout(() => { this.notifyTimer = undefined; this.nearby?.publish(); }, 750);
-    }
     return { status: response.status, headers: response.headers, text: response.text, arrayBuffer: response.arrayBuffer };
   };
   async createSyncFolder(): Promise<void> {
@@ -308,9 +281,9 @@ export default class DriveSyncPlugin extends Plugin {
   }
   async setSyncEnabled(enabled: boolean): Promise<void> {
     this.settings.syncEnabled = enabled;
-    if (!enabled) { this.engine?.stop(); this.stopNearby(); }
+    if (!enabled) { this.engine?.stop(); if (this.timer) { window.clearTimeout(this.timer); this.timer = undefined; } }
     await this.saveSettings();
-    await this.restartNearby();
+
     if (enabled) await this.syncNow(); else this.setMessage('Paused');
   }
   private localStore(): LocalStore {
@@ -359,10 +332,13 @@ export default class DriveSyncPlugin extends Plugin {
   syncNow(full = false): Promise<void> {
     if (full) this.fullRequested = true;
     if (this.running) return full ? this.running.then(() => this.syncNow()) : this.running;
-    if (this.unloaded) return Promise.resolve();
+    if (this.unloaded || document.visibilityState !== 'visible') return Promise.resolve();
     if (!this.settings.folderId || this.settings.folderPending) { this.setMessage(this.auth.state.status === 'connected' ? 'Connected · choose a sync folder' : 'Connect Google to begin'); return Promise.resolve(); }
     if (!this.settings.syncEnabled) { this.setMessage('Paused'); return Promise.resolve(); }
-    if (Date.now() < this.retryAt) { this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : 'Sync incomplete · retrying'); return Promise.resolve(); }
+    if (this.network.offline) { this.setMessage(OFFLINE_MESSAGE); return Promise.resolve(); }
+    if (Date.now() < Math.max(this.retryAt, this.network.retryAfter)) { this.dirty = true; this.schedule(); return Promise.resolve(); }
+    if (this.reconciliationRequired && !this.fullRequested) { this.setMessage('Full reconciliation required'); return Promise.resolve(); }
+    if (this.timer) { window.clearTimeout(this.timer); this.timer = undefined; }
     const verifyAll = this.fullRequested; this.fullRequested = false;
     if (verifyAll) this.localIndex.clear();
     this.dirty = false; this.setMessage(verifyAll ? 'Full reconciliation…' : 'Syncing…');
@@ -378,40 +354,55 @@ export default class DriveSyncPlugin extends Plugin {
     });
     const engine = new SyncEngine(this.localStore(), remote, this.settings.syncState, () => this.saveSettings(), verifyAll);
     this.engine = engine;
+    const networkFailures = this.network.failures;
+    const recoveryEpoch = this.recoveryEpoch;
+    const suspensionEpoch = this.suspensionEpoch;
     const run = (async () => {
       try {
+        if (!verifyAll && !this.settings.driveIndex && Object.keys(this.settings.syncState.baseline).length) throw new ReconciliationRequired();
         const result = await engine.run();
-        this.failures = 0; this.retryAt = 0;
+        this.reconciliationRequired = false;
+        this.failures = 0; this.retryAt = 0; this.retryIsNetwork = false;
         this.nextCheck = Date.now() + 60_000;
-        if (result.downloaded > 0) this.nearby?.publish();
         if (this.unloaded || !this.settings.syncEnabled) return;
+        if (this.network.offline) { this.setMessage(OFFLINE_MESSAGE); return; }
         this.details = [...result.pending, ...result.conflicts.map(path => `Preserved conflict: ${path}`)];
         this.lastChecked = new Date().toLocaleTimeString();
         this.setMessage(result.pending.length ? `${result.pending.length} items need attention` : result.conflicts.length ? 'Conflicts preserved' : this.dirty ? 'Checking new changes…' : 'Synced with Drive');
         if (result.conflicts.length) new Notice('Drive Sync preserved both edits in conflict copies.', 8000);
       } catch (error) {
+        if (error instanceof ReconciliationRequired) {
+          this.reconciliationRequired = true; this.dirty = false;
+          this.details = [error.message]; this.setMessage('Full reconciliation required'); return;
+        }
         if (verifyAll) this.fullRequested = true;
         if (!this.unloaded && this.settings.syncEnabled) {
+          if (this.network.offline) { this.setMessage(OFFLINE_MESSAGE); return; }
+          this.retryIsNetwork = (this.network.failures !== networkFailures && this.network.lastFailureWasNetwork) || suspensionEpoch !== this.suspensionEpoch;
+          // A request already in flight can fail after the recovery event. Do not
+          // let that old network failure put the newly connected device back to sleep.
+          if (this.retryIsNetwork && recoveryEpoch !== this.recoveryEpoch) {
+            this.clearNetworkRetry(); this.dirty = true; return;
+          }
           this.retryAt = Date.now() + Math.min(300_000, 30_000 * 2 ** Math.min(this.failures++, 4));
-          this.nextCheck = this.retryAt;
+          this.dirty = true;
           this.details = [error instanceof Error ? error.message : 'Request failed; retrying.'];
           this.setMessage(this.auth.state.status === 'needs-reconnect' ? 'Reconnect Google' : 'Sync incomplete · retrying');
         }
       }
     })();
     this.running = run;
-    void run.finally(() => { this.running = undefined; if (this.dirty) this.schedule(); });
+    void run.finally(() => { this.running = undefined; this.schedule(); });
     return run;
   }
   pairingHost(): PairingHost {
     return {
       config: async () => {
         if (!this.settings.folderId || this.settings.folderPending) throw new Error('Choose the desktop sync folder before adding a device.');
-        await this.enableNearbyHost();
-        return validateConfig({ clientId: this.settings.clientId, clientSecret: secureStore(this.app).get(this.settings.clientSecretName), folderId: this.settings.folderId, vaultName: this.app.vault.getName(), nearby: this.nearbyServer?.config });
+        return validateConfig({ clientId: this.settings.clientId, clientSecret: secureStore(this.app).get(this.settings.clientSecretName), folderId: this.settings.folderId, vaultName: this.app.vault.getName() });
       },
       accept: async config => {
-        if (this.settings.clientId && this.settings.clientId !== config.clientId) throw new Error('This vault uses a different Google client. Use an empty test vault to pair it.');
+        if (this.settings.clientId && this.settings.clientId !== config.clientId) throw new Error('This vault uses a different Google client. Use an empty vault to pair it.');
         if (this.settings.folderId && this.settings.folderId !== config.folderId) throw new Error('This vault already uses a different sync folder. Use an empty vault.');
         if (!config.folderId) throw new Error('Desktop has no sync folder configured.');
         const store = secureStore(this.app); const key = `drive-client-${this.settings.instanceId}`;
@@ -419,16 +410,7 @@ export default class DriveSyncPlugin extends Plugin {
         if (store.get(key) !== config.clientSecret) throw new Error('Could not store paired configuration.');
         this.settings.clientId = config.clientId; this.settings.clientSecretName = key;
         this.settings.folderId = config.folderId; this.settings.folderPending = false; this.settings.syncEnabled = true;
-        if (config.nearby) {
-          const peer = validateNearby(config.nearby);
-          this.stopNearby();
-          store.set(`drive-nearby-${this.settings.instanceId}`, peer.key);
-          if (store.get(`drive-nearby-${this.settings.instanceId}`) !== peer.key) throw new Error('Could not store nearby notification key.');
-          const { key: _key, ...endpoint } = peer;
-          this.settings.nearby = endpoint; this.settings.nearbyHost = false;
-        }
         await this.saveSettings();
-        await this.restartNearby();
         if (this.auth.state.status === 'connected') void this.syncNow();
         else this.setMessage('Configuration received · sign in to Google');
       },
@@ -487,9 +469,9 @@ export default class DriveSyncPlugin extends Plugin {
     if (!this.auth) return;
     this.statusEl?.setText(`Drive: ${this.syncMessage}`);
     if (this.ribbonStatus) {
-      const attention = this.auth.state.status === 'needs-reconnect' || this.retryAt > 0 || this.details.length > 0 || this.syncMessage === 'Sync folder does not match this vault’s saved state';
+      const attention = this.auth.state.status === 'needs-reconnect' || (!this.network.offline && this.retryAt > 0) || this.details.length > 0 || this.syncMessage === 'Sync folder does not match this vault’s saved state';
       const busy = ['Syncing…', 'Full reconciliation…', 'Changes pending', 'Checking new changes…'].includes(this.syncMessage);
-      const icon = attention ? 'cloud-alert' : this.syncMessage === 'Paused' ? 'pause' : busy ? 'refresh-cw' : 'cloud';
+      const icon = this.syncMessage === OFFLINE_MESSAGE ? 'cloud-off' : attention ? 'cloud-alert' : this.syncMessage === 'Paused' ? 'pause' : busy ? 'refresh-cw' : 'cloud';
       if (icon !== this.ribbonIcon) { setIcon(this.ribbonStatus, icon); this.ribbonIcon = icon; }
       this.ribbonStatus.toggleClass('drive-sync-needs-attention', attention);
       this.ribbonStatus.setAttribute('aria-label', `Drive Sync: ${this.syncMessage}. Show sync status`);
@@ -513,9 +495,9 @@ class ConnectionModal extends Modal {
     this.setTitle(`Drive Sync · ${this.app.vault.getName()}`);
     const status = this.contentEl.createEl('p', { attr: { role: 'status', 'aria-live': 'polite' } });
     const details = this.contentEl.createEl('pre'); details.style.whiteSpace = 'pre-wrap';
-    const render = () => { status.setText(this.plugin.syncMessage); details.setText([this.plugin.auth.state.message, this.plugin.lastChecked ? `Last completed check: ${this.plugin.lastChecked}` : '', this.plugin.nearbyMessage, ...this.plugin.details].filter(Boolean).join('\n')); };
+    const render = () => { status.setText(this.plugin.syncMessage); details.setText([this.plugin.auth.state.message, this.plugin.lastChecked ? `Last completed check: ${this.plugin.lastChecked}` : '', ...this.plugin.details].filter(Boolean).join('\n')); };
     render(); this.unsubscribe = this.plugin.subscribe(render);
-    new Setting(this.contentEl).addButton(b => b.setButtonText('Sync now').setCta().onClick(() => void this.plugin.syncNow()))
+    new Setting(this.contentEl).addButton(b => b.setButtonText('Sync now').setCta().onClick(() => void this.plugin.manualSync()))
       .addButton(b => b.setButtonText(this.plugin.settings.syncEnabled ? 'Pause' : 'Resume').onClick(() => void this.plugin.run(async () => {
         await this.plugin.setSyncEnabled(!this.plugin.settings.syncEnabled); b.setButtonText(this.plugin.settings.syncEnabled ? 'Pause' : 'Resume');
       })));
@@ -523,7 +505,7 @@ class ConnectionModal extends Modal {
     const advanced = this.contentEl.createEl('details'); advanced.createEl('summary', { text: 'Connection and diagnostics' });
     new Setting(advanced).setName('Full reconciliation').setDesc('Recovery check: rebuilds indexes and reads every file on both sides. Existing conflict copies and deletion protections remain in effect; large vaults can take time.')
       .addButton(b => b.setButtonText('Full reconciliation').onClick(() => {
-        b.setDisabled(true); void this.plugin.run(() => finishUiAction(this.plugin.syncNow(true), () => b.setDisabled(false)));
+        b.setDisabled(true); void this.plugin.run(() => finishUiAction(this.plugin.manualSync(true), () => b.setDisabled(false)));
       }));
     new Setting(advanced).addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())))
       .addButton(b => b.setButtonText('Test refresh').onClick(() => void this.plugin.run(() => this.plugin.auth.refresh())));
@@ -553,7 +535,7 @@ class DriveSyncSettings extends PluginSettingTab {
   display(): void {
     this.unsubscribe?.(); const el = this.containerEl; el.empty();
     el.createEl('h2', { text: 'Drive Sync' });
-    el.createEl('p', { text: 'Your own Google project, normal files in Drive, and a separate local vault on each device. Use a disposable vault while this beta is being validated.' });
+    el.createEl('p', { text: 'Your own Google project, normal files in Drive, and a separate local vault on each device. Each device signs in separately; no sync server is needed.' });
     if (Platform.isMobileApp && !this.plugin.settings.folderId) new Setting(el).setName('Set up from desktop').setDesc('Transfer Google configuration and the sync folder over your local network.')
       .addButton(b => b.setButtonText('Connect to existing device').setCta().onClick(() => this.plugin.showPairing()));
     if (Platform.isDesktopApp && !this.plugin.settings.folderId) new Setting(el).setName('Reuse Google setup from another vault')
@@ -566,9 +548,9 @@ class DriveSyncSettings extends PluginSettingTab {
       .addButton(b => b.setButtonText('Create sync folder').onClick(() => void this.plugin.run(async () => { await this.plugin.createSyncFolder(); this.display(); })));
     if (this.plugin.settings.folderId && !this.plugin.settings.folderPending) {
       new Setting(el).setName(`Google Drive folder · ${this.app.vault.getName()}`).addButton(b => b.setButtonText('Open folder in Drive').onClick(() => window.open(`https://drive.google.com/drive/folders/${this.plugin.settings.folderId}`, '_blank')));
-      new Setting(el).setName('Automatic sync').setDesc('Runs after saved edits, nearby device notifications, and on resume. Checks Drive changes after 60 seconds without a successful check.')
+      new Setting(el).setName('Automatic sync').setDesc('Uploads saved edits automatically. Checks Drive changes on open, resume, and reconnection, then every 60 seconds while active and online.')
         .addToggle(t => t.setValue(this.plugin.settings.syncEnabled).onChange(value => void this.plugin.run(() => this.plugin.setSyncEnabled(value))));
-      if (Platform.isDesktopApp) new Setting(el).setName('Set up your phone').setDesc('Pairing also enables an authenticated local-network listener while this vault is open. Existing devices can pair again to enable nearby notifications; Google tokens stay on each device.')
+      if (Platform.isDesktopApp) new Setting(el).setName('Set up your phone').setDesc('Share Google project configuration and this vault’s Drive folder with your phone using a QR code. Each device keeps its own Google sign-in.')
         .addButton(b => b.setButtonText('Add device').setCta().onClick(() => new AddDeviceModal(this.app, this.plugin.pairingHost()).open()));
     }
     const status = new Setting(el).setName('Sync status').setDesc(this.plugin.syncMessage).addButton(b => b.setButtonText('View details').onClick(() => this.plugin.showConnection()));
