@@ -12,6 +12,9 @@ import { AddDeviceModal, ConnectDeviceModal, type PairingHost } from './pairing-
 import { validateInvitation, validateConfig, type Invitation } from './pairing';
 import { DriveStore, folderIdentifier } from './drive';
 import { FolderModal } from './folder-ui';
+import { VaultSetup, projectConfig } from './vault-setup';
+import { ReuseVaultSetupModal, approveVaultSetup } from './vault-setup-ui';
+import { TransferBarrier, VALIDATION_MANIFEST, validateFixture } from './validation';
 import { SyncEngine, syncPath, type SyncState, type LocalStore } from './sync';
 
 interface Settings {
@@ -56,6 +59,9 @@ export default class DriveSyncPlugin extends Plugin {
   private engine?: SyncEngine;
   private probeRunning = false;
   private pairingModal?: ConnectDeviceModal;
+  private vaultSetup?: VaultSetup;
+  private reuseModal?: ReuseVaultSetupModal;
+  readonly validationBarrier = new TransferBarrier(() => this.updateStatus());
   probeReport?: ProbeReport;
   async onload(): Promise<void> {
     const saved = await this.loadData() as Partial<Settings> | null;
@@ -75,12 +81,20 @@ export default class DriveSyncPlugin extends Plugin {
     if (Platform.isDesktopApp) {
       this.statusEl = this.addStatusBarItem(); this.statusEl.addClass('drive-sync-status');
       this.registerDomEvent(this.statusEl, 'click', () => this.showConnection());
+      if (typeof BroadcastChannel !== 'undefined' && this.app.vault.getName().length <= 200 && !/[\x00-\x1f\x7f]/.test(this.app.vault.getName())) {
+        this.vaultSetup = new VaultSetup(new BroadcastChannel('drive-sync-vault-setup-v1'), this.app.vault.getName(),
+          () => !!this.settings.clientId && !!secrets.get(this.settings.clientSecretName),
+          () => projectConfig({ clientId: this.settings.clientId, clientSecret: secrets.get(this.settings.clientSecretName) }),
+          (peer, code, signal) => approveVaultSetup(this.app, peer, code, signal));
+        this.register(() => this.vaultSetup?.close());
+      }
     }
     const ribbon = this.addRibbonIcon('cloud', 'Drive Sync status', () => this.showConnection());
     this.subscribe(() => ribbon.setAttribute('aria-label', `Drive Sync: ${this.syncMessage}`));
     this.addCommand({ id: 'show-connection', name: 'Show sync status', callback: () => this.showConnection() });
     this.addCommand({ id: 'sync-now', name: 'Sync now', callback: () => void this.syncNow() });
     this.addCommand({ id: 'test-drive-edits', name: 'Developer: test disposable Drive files', callback: () => new DriveProbeModal(this.app, this).open() });
+    this.addCommand({ id: 'validate-fixture', name: 'Developer: synthetic vault validation', callback: () => new ValidationModal(this.app, this).open() });
     this.registerObsidianProtocolHandler(PROTOCOL_ACTION, params => {
       void this.run(async () => { await this.completeSignIn(parseCallback(new URLSearchParams(params))); });
     });
@@ -117,6 +131,7 @@ export default class DriveSyncPlugin extends Plugin {
   }
   onunload(): void {
     this.unloaded = true; this.engine?.stop(); this.auth?.stop();
+    this.validationBarrier.stop();
     if (this.timer) window.clearTimeout(this.timer);
     this.mobileStatus?.remove(); this.listeners.clear();
   }
@@ -149,6 +164,7 @@ export default class DriveSyncPlugin extends Plugin {
       if (this.unloaded) throw new Error('Plugin unloaded.');
       response = await requestUrl({ ...request, headers: { ...request.headers, Authorization: `Bearer ${refreshed}` }, throw: false });
     }
+    await this.validationBarrier.after(request, response.status);
     return { status: response.status, headers: response.headers, text: response.text, arrayBuffer: response.arrayBuffer };
   };
   async createSyncFolder(): Promise<void> {
@@ -284,6 +300,22 @@ export default class DriveSyncPlugin extends Plugin {
     }
     if (invitation) this.pairingModal.useInvitation(invitation);
   }
+  reuseGoogleSetup(): void {
+    if (!this.vaultSetup) { new Notice('Vault setup sharing is unavailable in this environment. Use Google project configuration.'); return; }
+    if (this.reuseModal) return;
+    if (this.settings.folderId || this.auth.state.status !== 'disconnected') { new Notice('Reuse setup in a new, disconnected vault before selecting its Drive folder.'); return; }
+    this.reuseModal = new ReuseVaultSetupModal(this.app, this.vaultSetup, async input => {
+      if (this.unloaded || this.settings.folderId || this.auth.state.status !== 'disconnected') throw new Error('Reuse setup in a new, disconnected vault before selecting its Drive folder.');
+      const config = projectConfig(input);
+      const store = secureStore(this.app); const key = `drive-client-${this.settings.instanceId}`;
+      store.set(key, config.clientSecret);
+      if (store.get(key) !== config.clientSecret) throw new Error('Could not save Google configuration in this vault’s Keychain.');
+      this.settings.clientId = config.clientId; this.settings.clientSecretName = key;
+      await this.saveSettings(); this.setMessage('Configuration received · sign in to Google');
+    }, () => { this.reuseModal = undefined; });
+    this.reuseModal.open();
+    this.register(() => this.reuseModal?.close());
+  }
   async completeSignIn(response: AuthCallback): Promise<void> {
     await this.auth.complete(response);
     this.retryAt = 0;
@@ -368,6 +400,9 @@ class DriveSyncSettings extends PluginSettingTab {
     el.createEl('p', { text: 'Your own Google project, normal files in Drive, and a separate local vault on each device. Use a disposable vault while this beta is being validated.' });
     if (Platform.isMobileApp && !this.plugin.settings.folderId) new Setting(el).setName('Set up from desktop').setDesc('Transfer Google configuration and the sync folder over your local network.')
       .addButton(b => b.setButtonText('Connect to existing device').setCta().onClick(() => this.plugin.showPairing()));
+    if (Platform.isDesktopApp && !this.plugin.settings.folderId) new Setting(el).setName('Reuse Google setup from another vault')
+      .setDesc('Use an open vault on this computer. Approve the transfer there, then sign in and select this vault’s own Drive folder.')
+      .addButton(b => b.setButtonText('Choose vault').onClick(() => this.plugin.reuseGoogleSetup()));
     const connection = new Setting(el).setName('Google connection').setDesc(this.plugin.auth.state.message)
       .addButton(b => b.setButtonText('Sign in to Google').onClick(() => void this.plugin.run(() => this.plugin.connect())));
     if ((!this.plugin.settings.folderId || this.plugin.settings.folderPending) && Platform.isDesktopApp) new Setting(el).setName('Sync folder').setDesc('Choose an existing Google Drive folder or create a new one for this vault. Files added through Drive are included automatically.')
@@ -381,7 +416,8 @@ class DriveSyncSettings extends PluginSettingTab {
     }
     const status = new Setting(el).setName('Sync status').setDesc(this.plugin.syncMessage).addButton(b => b.setButtonText('View details').onClick(() => this.plugin.showConnection()));
     const displayedFolder = this.plugin.settings.folderId;
-    this.unsubscribe = this.plugin.subscribe(() => { if (displayedFolder !== this.plugin.settings.folderId) { this.display(); return; } connection.setDesc(this.plugin.auth.state.message); status.setDesc(this.plugin.syncMessage); });
+    const displayedClient = this.plugin.settings.clientId + this.plugin.settings.clientSecretName;
+    this.unsubscribe = this.plugin.subscribe(() => { if (displayedFolder !== this.plugin.settings.folderId || displayedClient !== this.plugin.settings.clientId + this.plugin.settings.clientSecretName) { this.display(); return; } connection.setDesc(this.plugin.auth.state.message); status.setDesc(this.plugin.syncMessage); });
     const config = el.createEl('details'); config.open = !this.plugin.settings.clientId && Platform.isDesktopApp;
     config.createEl('summary', { text: Platform.isDesktopApp ? 'Google project configuration' : 'Advanced Google configuration' });
     if (Platform.isMobileApp && this.plugin.settings.folderId) new Setting(config).addButton(b => b.setButtonText('Pair with desktop again').onClick(() => this.plugin.showPairing()));
@@ -414,4 +450,36 @@ class DriveProbeModal extends Modal {
     }));
   }
   onClose(): void { this.contentEl.empty(); }
+}
+class ValidationModal extends Modal {
+  private unsubscribe?: () => void;
+  constructor(app: App, private readonly plugin: DriveSyncPlugin) { super(app); }
+  onOpen(): void {
+    this.setTitle(`Synthetic validation · ${this.app.vault.getName()}`);
+    this.contentEl.createEl('p', { text: 'Developer checks for disposable vaults only. A synthetic validation manifest is required to arm an interruption. The barrier holds a successful Google response before the sync engine checkpoints it; no credentials or file contents are logged.' });
+    const output = this.contentEl.createEl('p', { attr: { role: 'status' } });
+    const barrier = this.contentEl.createEl('p', { attr: { role: 'status' } });
+    const render = () => barrier.setText(this.plugin.validationBarrier.status);
+    this.unsubscribe = this.plugin.subscribe(render); render();
+    const work = (fn: () => Promise<void>) => { void fn().catch(e => output.setText(e instanceof Error ? e.message : 'Validation failed.')); };
+    const requireFixture = async () => {
+      const manifest = JSON.parse(await this.app.vault.adapter.read(VALIDATION_MANIFEST));
+      if (manifest.kind !== 'drive-sync-synthetic-validation-v1') throw new Error('Synthetic fixture manifest required.');
+    };
+    new Setting(this.contentEl).addButton(b => b.setButtonText('Verify all fixture checksums').onClick(() => work(async () => {
+      b.setDisabled(true); output.setText('Checking local file bytes…');
+      try { output.setText(await validateFixture({ read: p => this.app.vault.adapter.read(p), readBinary: p => this.app.vault.adapter.readBinary(p), list: () => this.app.vault.getFiles().map(f => f.path) })); }
+      finally { b.setDisabled(false); }
+    })));
+    for (const mode of ['upload', 'download'] as const) new Setting(this.contentEl).addButton(b => b.setButtonText(`Hold next ${mode} response`).onClick(() => work(async () => { await requireFixture(); this.plugin.validationBarrier.arm(mode); })));
+    new Setting(this.contentEl).addButton(b => b.setButtonText('Create synthetic upload note').onClick(() => work(async () => {
+      await requireFixture();
+      const path = `Drive Sync interruption ${crypto.randomUUID()}.md`;
+      await this.app.vault.create(path, '# Synthetic interruption test\n\nCreated on this device to test recovery after Google accepts an upload.\n');
+      output.setText(`Created ${path}`);
+    })));
+    new Setting(this.contentEl).addButton(b => b.setButtonText('Release response').onClick(() => this.plugin.validationBarrier.release()))
+      .addButton(b => b.setButtonText('Cancel barrier').onClick(() => this.plugin.validationBarrier.stop()));
+  }
+  onClose(): void { this.unsubscribe?.(); this.contentEl.empty(); }
 }

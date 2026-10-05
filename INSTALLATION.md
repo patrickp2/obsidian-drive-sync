@@ -2,7 +2,7 @@
 
 Drive Sync uses the Google Drive API on both desktop and iPhone. Each device has its own local Obsidian vault, and Drive stores ordinary Markdown files in one dedicated folder. No hosted token broker or pairing service is required.
 
-**0.4.2 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
+**0.5.0 is a development beta.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Use disposable vaults until the real-device tests and production OAuth review are complete. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
 
 ## Setup at a glance
 
@@ -26,7 +26,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
    https://github.com/patrickp2/obsidian-drive-sync
    ```
 
-5. Select the published **0.4.2** prerelease and enable Drive Sync. If BRAT does not list it immediately, refresh its release list. This setup requires 0.4.2 or newer.
+5. Select the published **0.5.0** prerelease and enable Drive Sync. If BRAT does not list it immediately, refresh its release list. This setup requires 0.5.0 or newer.
 
 A GitHub account or personal access token is normally unnecessary for this public repository. If GitHub rate-limits BRAT, wait and retry. Plugins are installed per vault and per device. See [BRAT's guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md).
 
@@ -58,7 +58,7 @@ The Google token can access all Drive files. Folder restrictions are enforced in
 
 1. Install/update Obsidian. Create an empty local test vault with **Store in iCloud** off.
 2. Install and enable BRAT through **Settings → Community plugins**.
-3. In BRAT, add the same repository and select the same **0.4.2** release. Enable Drive Sync.
+3. In BRAT, add the same repository and select the same **0.5.0** release. Enable Drive Sync.
 4. Put the Mac and phone on the same private local network. Keep desktop Obsidian open.
 5. On desktop, open **Settings → Drive Sync → Add device**. A three-minute QR invitation appears.
 6. On the phone, choose **Connect to existing device → Scan QR**. Scan the desktop QR, then choose **Approve device** on the Mac. Check the displayed desktop and local vault names, then tap **Connect this vault**. All phone steps stay in one panel. **Take QR photo** is available if the live camera is unsupported; a one-time invitation paste is under the alternative options. No individual client fields need to be copied.
@@ -78,7 +78,7 @@ If both devices changed a note, both edits are preserved using an ordinary `name
 
 ## More than one vault
 
-Use a **different Drive folder for each logical vault**, for example Work and Personal. Install the plugin in each desktop vault, reuse your Google project/client configuration, sign in, and choose or create that vault's folder. In the tested desktop app, Keychain entries are vault-specific: add the same client secret to the new vault's Keychain once; merely entering its existing entry name does not transfer it. Never copy the Google token or plugin data.json. On iPhone, create a corresponding local vault, install BRAT and Drive Sync there, and pair it with the matching desktop vault. The pairing panel displays both vault names before connecting.
+Use a **different Drive folder for each logical vault**, for example Work and Personal. Install the plugin in each desktop vault. With the configured vault still open in another Obsidian window on the same computer, choose **Settings → Drive Sync → Reuse Google setup from another vault → Choose vault**. Select the source, compare the displayed code in both vaults, and choose **Approve setup** in the source vault. The receiving vault saves only the Google client configuration in its own Keychain. Sign in separately, then choose or create its own Drive folder. Both vaults need 0.5.0 or newer. No clipboard, QR, shared credential file, or network listener is used for this same-computer transfer. Never copy Google tokens or plugin data.json. On iPhone, create a corresponding local vault, install BRAT and Drive Sync there, and pair it with the matching desktop vault. The pairing panel displays both vault names before connecting.
 
 Each vault has its own folder ID, baseline, pending changes, and device grant. Do not clone plugin `data.json` between vaults or point unrelated vaults at the same folder. Two vaults connected to the same folder intentionally synchronize the same files. Obsidian only runs plugins for open vaults; closed mobile vaults catch up when opened.
 
