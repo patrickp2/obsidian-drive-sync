@@ -100,3 +100,11 @@ The reused-configuration vault subsequently completed a fresh Google sign-in wit
 ### 0.5.1 status diagnostics
 
 Live interruption testing exposed a display issue: filesystem events during backoff could replace a reconnect/retry message with Changes pending. Scheduling and resume now retain the actionable state. Download errors include the affected vault path while preserving StaleWrite handling. These changes do not alter overwrite decisions or retry delays. All 87 checks and the build credential scan pass.
+
+The 259-file batch fully uploaded on the Mac: every local fixture SHA-256 matched its confirmed Drive baseline, all baseline Drive IDs were unique, and pending create/delete/rename/move journals were empty. The phone-origin note from the held upload arrived exactly once, with 103 bytes and the expected SHA-256. The phone encountered intermittent native “network connection was lost” errors during small-note downloads and continued to make progress after retries. 0.5.1 identifies the affected path; final phone checksum verification is pending.
+
+### 0.5.2 bounded native read retry
+
+The larger iPhone run encountered repeated native transport exceptions on ordinary small-note reads, advancing between failures but reaching long whole-cycle backoff. Native GET transport exceptions now receive at most two short retries (250 ms then 1 s), before the existing whole-cycle backoff. HTTP responses are not retried by this helper; writes are never replayed by it, and unload prevents further attempts. Read snapshot ETag checks remain intact. Two regression tests cover read recovery, bounded failure, unload, HTTP responses, and no automatic write replay. All 89 tests and the build credential scan pass.
+
+A bounded three-day follow-up checks the disposable fixture every twelve hours until 2026-10-08T01:10:33Z. The helper scripts/soak-check.mjs verifies fixture bytes and saved desktop baselines and can make twelve small synthetic note edits per round. It does not treat desktop checkpoints as proof of current phone bytes. Phone verification remains a separate real-device check; the full Mac restart remains deferred.

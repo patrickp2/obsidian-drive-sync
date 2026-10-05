@@ -15,6 +15,7 @@ import { FolderModal } from './folder-ui';
 import { VaultSetup, projectConfig } from './vault-setup';
 import { ReuseVaultSetupModal, approveVaultSetup } from './vault-setup-ui';
 import { TransferBarrier, VALIDATION_MANIFEST, validateFixture } from './validation';
+import { retryRead } from './read-retry';
 import { SyncEngine, syncPath, type SyncState, type LocalStore } from './sync';
 
 interface Settings {
@@ -156,13 +157,14 @@ export default class DriveSyncPlugin extends Plugin {
     if (this.unloaded) throw new Error('Plugin unloaded.');
     const token = await this.auth.tokenForDrive();
     if (this.unloaded) throw new Error('Plugin unloaded.');
-    let response = await requestUrl({ ...request, headers: { ...request.headers, Authorization: `Bearer ${token}` }, throw: false });
+    const send = (accessToken: string) => retryRead(request.method, () => requestUrl({ ...request, headers: { ...request.headers, Authorization: `Bearer ${accessToken}` }, throw: false }), () => !this.unloaded);
+    let response = await send(token);
     if (response.status === 401) {
       // One refresh/retry only. Invalid grants surface Reconnect; never loop on 401.
       await this.auth.refresh();
       const refreshed = await this.auth.tokenForDrive();
       if (this.unloaded) throw new Error('Plugin unloaded.');
-      response = await requestUrl({ ...request, headers: { ...request.headers, Authorization: `Bearer ${refreshed}` }, throw: false });
+      response = await send(refreshed);
     }
     await this.validationBarrier.after(request, response.status);
     return { status: response.status, headers: response.headers, text: response.text, arrayBuffer: response.arrayBuffer };
