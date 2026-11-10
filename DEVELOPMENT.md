@@ -164,7 +164,7 @@ Expired Drive cursors and missing indexes for established vaults require the man
 
 Release validation: `npm run check` passes build, type checking, credential-pattern scanning, and 116 tests. Scheduler tests exercise the actual bundled plugin using synthetic Obsidian/Drive adapters: a full hour of 60-second checks; edit debounce resetting the deadline; offline suppression; background/resume and pause; in-flight edits and recovery; manual probing; Google cooldowns; and manual checkpoint recovery. Existing conflict, uncertain-write, attachment, deletion, and 2,000-file tests remain passing. These are automated results, not a new real-iPhone network/lifecycle test. Earlier real-device evidence above remains applicable to the unchanged file-transfer paths. Full Mac restart, controlled iPhone airplane-mode validation, and production OAuth review remain deferred.
 
-## 1.1.0 development — offline replacement recovery and three-way Markdown merge
+## 1.1.0 — offline replacement recovery and three-way Markdown merge
 
 Replacement writes persist `{id, baseHash, hash, snapshot?}` in `pendingWrites` before the network operation. Recovery compares the actual remote bytes to the attempted hash. A match checkpoints that accepted remote version before reconciling later local edits; otherwise the original common baseline remains authoritative and a fresh ETag is required.
 
@@ -174,9 +174,9 @@ Eligible Markdown baselines reference content-addressed, hash-verified snapshots
 
 A merge journal records all four input/output snapshot hashes and an upload-acknowledged flag before mutation. ETag-conditional upload comes first; its acknowledgment is persisted before guarded local application. If a reply is lost, matching remote output proves acceptance. Recovery rebases intervening local edits against the saved local input and merged output; overlapping late edits get a conflict copy. A further check reconciles any newer remote/local changes. State-write failure and restart are tested at each save boundary. Unverifiable journal inputs stop recovery for review. Journals follow confirmed renames and are retired with confirmed deletions.
 
-Automated validation: `npm run check` passes the build, type check, credential-pattern scan, and 152 tests. Added coverage includes the reproduced lost-reply/next-offline-edit case, independent-device convergence, merge upload failure, overlapping and identical edits, stale ETags, edits during guarded application, save failures before/after persistence, same-process retry, disk failure, corrupt/missing snapshots, old-state migration, rename recovery, Unicode/CRLF, size bounds, and actual temporary-filesystem snapshot persistence/cleanup. These are automated checks; no new real Mac/iPhone offline validation has been performed yet.
+Automated validation: `npm run check` passes the build, type check, credential-pattern scan, and 152 tests. Added coverage includes the reproduced lost-reply/next-offline-edit case, independent-device convergence, merge upload failure, overlapping and identical edits, stale ETags, edits during guarded application, save failures before/after persistence, same-process retry, disk failure, corrupt/missing snapshots, old-state migration, rename recovery, Unicode/CRLF, size bounds, and actual temporary-filesystem snapshot persistence/cleanup. These are automated checks; separate real-device validation is recorded below.
 
-Required device signoff before publishing 1.1.0:
+Real-device validation procedure:
 
 1. Install the local development build on Mac and iPhone, preserving each device's existing credentials and settings. Confirm a clean sync establishes common snapshots.
 2. Use a uniquely named disposable Markdown note with separated top/bottom sections. Take the phone offline, edit only on the phone, reconnect, and verify both devices converge with no conflict copy.
@@ -184,4 +184,21 @@ Required device signoff before publishing 1.1.0:
 4. Change the same line independently while the phone is offline. Verify both versions are preserved, and the status details explain the overlap.
 5. Repeat resume after force-closing/reopening the phone; verify no repeated conflict copies, missing edits, or stuck sync state. Remove only the disposable test note/copies through normal recoverable trash after validation.
 
-1.0.0 remains the published release. No public validation tag is published automatically: the installed BRAT version considers prereleases while resolving `latest`, so marking a test release as prerelease would not isolate automatic updates.
+The installed BRAT version considers numbered prereleases while resolving `latest`, so merely marking a numbered test release as prerelease would not isolate automatic updates. Device validation instead used an explicitly pinned unnumbered preview, which sorts behind numbered releases in the installed resolver. After signoff the numbered 1.1.0 release is published as latest and both devices return to tracking latest.
+
+### Real-device preview validation — 10 November 2026
+
+Preview source: `f3b6cee` on `codex/offline-merge-recovery`. Both existing Personal vaults installed the exact preview through BRAT 2.2.0, explicitly selecting the unnumbered `offline-merge-preview` tag. The desktop `main.js` matches the tested build byte for byte. The manifest reports the upcoming 1.1.0. Existing Google grants restored and both devices showed Synced with Drive. During validation stable latest remained 1.0.0; the unnumbered preview sorts behind numbered releases in the installed BRAT resolver, while remaining explicitly selectable.
+
+All deliberate note edits used `ZZZ Offline merge validation.md` with separate Phone/Desktop lines and an unchanged spacer. Mac file-state checks inspected only that fixture's content, baseline hash, and journal presence. The phone was operated through iPhone Mirroring; slow held keypresses avoided dropped mirrored keyboard input.
+
+- Phone-only edit: paused phone sync, changed its Phone line from baseline to mobile, resumed, and checked desktop convergence. No conflict copies were created.
+- Independent edits: paused phone sync; changed its Phone line from mobile to offline; changed the Mac's Desktop line from baseline to desktop and confirmed its upload before resuming the phone. Both devices converged to Phone line offline / Desktop line desktop. Desktop baseline matched the combined bytes; no pending update/merge journal or conflict copy remained. The combined note was visually verified on the phone and a local screenshot was saved.
+- Overlapping edits: paused phone sync; changed its Phone line from offline to phone; changed that same line on the Mac to desktop and confirmed upload before phone resume. The canonical desktop line was retained and exactly one conflict copy preserved Phone line phone. The shared Desktop line remained intact.
+
+These checks used app-level pause/resume to isolate changes while Mirroring stayed connected. They validate the actual Drive adapters, mobile snapshot storage, guarded editor replacement, and merge/conflict paths; they are not radio-offline testing. The physical Airplane Mode/Wi-Fi-off check was then completed as recorded below.
+
+
+Physical offline/restart/reconnect check: the user enabled Airplane Mode with Wi-Fi off, changed the original fixture to `Phone line: airplane`, waited for local saving, force-closed/reopened Obsidian while still offline, and confirmed the edit remained. While the phone stayed offline, the Mac changed its separate line to `Desktop line: connected`; its uploaded hash was confirmed before the user restored connectivity. After reconnecting and locking the phone for Mirroring, the real phone visually showed both lines together. The Mac downloaded the combined bytes and its confirmed baseline matched them. No additional conflict copies or pending write/merge journals were present. This also exercised native mobile persistence and startup catch-up with the new snapshot store.
+
+Cleanup: the original fixture and the single deliberately created overlapping-edit conflict copy were deleted through Obsidian's explicit system-trash confirmation. The Mac had no remaining visible fixture files, fixture baselines, or fixture deletion intents after Drive trash confirmation. No permanent trash purge was performed. Test screenshots contain only the disposable note and are retained locally rather than committed.

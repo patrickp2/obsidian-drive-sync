@@ -2,7 +2,7 @@
 
 Drive Sync uses the Google Drive API on both desktop and iPhone. Each device has its own local Obsidian vault, and Drive stores ordinary Markdown files in one dedicated folder. No hosted token broker or pairing service is required.
 
-**Current release: 1.0.0.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
+**Current release: 1.1.0.** It syncs ordinary notes and attachments up to 20 MB each. Moves and deletions use version checks and recoverable trash. Keep the local vault outside Google Drive for desktop, iCloud, Dropbox, and other sync folders.
 
 ## Setup at a glance
 
@@ -26,7 +26,7 @@ You do **not** install the GitHub app. BRAT downloads the release files directly
    https://github.com/patrickp2/obsidian-drive-sync
    ```
 
-5. Select **Latest version** (currently **1.0.0**) and enable Drive Sync. Keep BRAT’s **Auto-update plugins at startup** enabled. If BRAT does not list it immediately, refresh its release list.
+5. Select **Latest version** (currently **1.1.0**) and enable Drive Sync. Keep BRAT’s **Auto-update plugins at startup** enabled. If BRAT does not list it immediately, refresh its release list.
 
 A GitHub account or personal access token is normally unnecessary for this public repository. If GitHub rate-limits BRAT, wait and retry. Plugins are installed per vault and per device. See [BRAT's guide](https://github.com/TfTHacker/obsidian42-brat/blob/main/BRAT-DEVELOPER-GUIDE.md).
 
@@ -58,7 +58,7 @@ The Google token can access all Drive files. Folder restrictions are enforced in
 
 1. Install/update Obsidian. Create an empty local vault with **Store in iCloud** off.
 2. Install and enable BRAT through **Settings → Community plugins**.
-3. In BRAT, add the same repository and select **Latest version** (currently **1.0.0**), with BRAT’s **Auto-update plugins at startup** enabled. Enable Drive Sync.
+3. In BRAT, add the same repository and select **Latest version** (currently **1.1.0**), with BRAT’s **Auto-update plugins at startup** enabled. Enable Drive Sync.
 4. Put the Mac and phone on the same private local network. Keep desktop Obsidian open.
 5. On desktop, open **Settings → Drive Sync → Add device**. A three-minute QR invitation appears.
 6. On the phone, choose **Connect to existing device → Scan QR**. Scan the desktop QR, then choose **Approve device** on the Mac. Check the displayed desktop and local vault names, then tap **Connect this vault**. All phone steps stay in one panel. **Take QR photo** is available if the live camera is unsupported; a one-time invitation paste is under the alternative options. No individual client fields need to be copied.
@@ -136,13 +136,13 @@ Disconnect attempts Google grant revocation and can require other devices using 
 
 See [FEASIBILITY.md](FEASIBILITY.md) for evidence and remaining limits, and [DEVELOPMENT.md](DEVELOPMENT.md) for building and testing.
 
-## Upgrading to 1.0.0
+## Upgrading to 1.1.0
 
 Update Drive Sync through BRAT in every device/vault. Existing Google connections and selected folders remain intact; no re-pairing is needed. Pairing is only for setting up additional devices. The obsolete nearby notification setup is ignored. This release has no dependency on a Firestore project or hosted relay.
 
-## Upcoming 1.1.0: offline recovery and Markdown merging
+## Offline recovery and Markdown merging in 1.1.0
 
-The development build recovers accepted replacement uploads whose replies were lost. Once the phone reconnects, it compares Drive against its persisted upload journal before deciding whether another device edited the note.
+The plugin recovers accepted replacement uploads whose replies were lost. Once the phone reconnects, it compares Drive against its persisted upload journal before deciding whether another device edited the note.
 
 For Markdown notes with a confirmed common version, separate edits to different lines combine automatically. Overlapping or ambiguous edits still produce ordinary conflict copies, with a reason in sync details. Automatic merging is limited to 256 KiB and 2,000 lines per input and result; larger notes and attachments retain conflict preservation. New and upgraded notes need a successful sync to establish their common version. Previously created conflict copies are not automatically combined or removed.
 
@@ -150,4 +150,4 @@ Common versions and interrupted-merge inputs are ordinary local text snapshots u
 
 A missing or corrupt common snapshot falls back to preserving both versions. An interrupted merge with unavailable recovery inputs stops that note for review, without overwriting either side. Successful merging and upload recovery do not display an alert; details are available from the sync status panel. The 60-second foreground timer and immediate resume checks are unchanged.
 
-This build is not yet a published release. Real Mac/iPhone offline-edit validation must pass before 1.1.0 is published.
+Real Mac/iPhone validation passed on 10 November 2026, including phone-only edits, independent and overlapping changes with transfers paused, and a physical Airplane Mode/Wi-Fi-off edit that survived force-close/reopen and merged after reconnection. These are individual validation runs, not a guarantee across every device/network. See DEVELOPMENT.md for the evidence.

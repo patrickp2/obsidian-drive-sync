@@ -4,13 +4,13 @@ An Obsidian plugin project for automatically syncing local Mac and iPhone/iPad v
 
 The Mac vault will live outside folders managed by Google Drive for desktop or other sync services. After setup, routine synchronization should happen automatically while the vault is open and the device allows execution, with visible pending work and preserved conflicts.
 
-**Current release: 1.0.0.** Checks Drive changes on open, resume, and reconnection, then 60 seconds after the last successful sync while the app is active and online. Saved local edits upload after a short debounce. No Firebase, hosted notification service, or nearby-device sync connection is required. Existing users only need to update on each device; Google sign-ins and vault folders are retained.
+**Current release: 1.1.0.** Checks Drive changes on open, resume, and reconnection, then 60 seconds after the last successful sync while the app is active and online. Saved local edits upload after a short debounce. No Firebase, hosted notification service, or nearby-device sync connection is required. Existing users only need to update on each device; Google sign-ins and vault folders are retained.
 
 The automated suite covers incremental sync, offline scheduling, conflict preservation, interrupted transfers, and manual recovery. Earlier Mac/iPhone validation is recorded in [DEVELOPMENT.md](DEVELOPMENT.md). Full Mac restart and production OAuth review remain deferred; this release does not claim those checks are complete.
 
 Start with the [full installation guide](INSTALLATION.md). It covers BRAT on desktop and iPhone, one-time Google project setup, today's per-device sign-in, troubleshooting, and the pairing/automatic-sync flow. Installing the GitHub app is unnecessary.
 
-The upcoming 1.1.0 development build adds interrupted-upload recovery and conservative automatic Markdown merging. It is awaiting real Mac/iPhone offline validation; 1.0.0 remains the published release.
+Version 1.1.0 recovers interrupted replacement uploads and combines independent Markdown edits using a verified common version. Overlapping edits keep conflict copies. The 152-test suite and real Mac/iPhone validation passed, including an Airplane Mode edit that survived force-close/reopen and merged after reconnection. See [validation details](DEVELOPMENT.md) for the scope of those checks.
 
 ## Project layout
 
