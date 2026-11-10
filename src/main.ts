@@ -1,3 +1,4 @@
+import { snapshotStore } from './snapshots';
 import { NetworkAccess, OFFLINE_MESSAGE } from './network';
 import { finishUiAction } from './ui-action';
 import { runLifecycleProbe } from './lifecycle-probe';
@@ -44,6 +45,7 @@ export default class DriveSyncPlugin extends Plugin {
   syncMessage = 'Set up Google to begin.';
   lastChecked = '';
   details: string[] = [];
+  syncInfo: string[] = [];
   private statusEl?: HTMLElement;
   private ribbonStatus?: HTMLElement;
   private ribbonIcon = '';
@@ -352,7 +354,7 @@ export default class DriveSyncPlugin extends Plugin {
         this.settings.driveIndex = index;
       }
     });
-    const engine = new SyncEngine(this.localStore(), remote, this.settings.syncState, () => this.saveSettings(), verifyAll);
+    const engine = new SyncEngine(this.localStore(), remote, this.settings.syncState, () => this.saveSettings(), verifyAll, snapshotStore(this.app.vault.adapter, `${this.app.vault.configDir}/plugins/${this.manifest.id}/merge-snapshots`));
     this.engine = engine;
     const networkFailures = this.network.failures;
     const recoveryEpoch = this.recoveryEpoch;
@@ -366,7 +368,12 @@ export default class DriveSyncPlugin extends Plugin {
         this.nextCheck = Date.now() + 60_000;
         if (this.unloaded || !this.settings.syncEnabled) return;
         if (this.network.offline) { this.setMessage(OFFLINE_MESSAGE); return; }
-        this.details = [...result.pending, ...result.conflicts.map(path => `Preserved conflict: ${path}`)];
+        if (result.followUp) this.dirty = true;
+        this.details = [...result.pending, ...result.conflicts.map(path => {
+          const reason = result.conflictDetails.find(detail => detail.path === path)?.reason;
+          return `Preserved conflict: ${path}${reason ? ` (${reason})` : ''}`;
+        })];
+        this.syncInfo = [...result.recovered.map(path => `Recovered interrupted upload: ${path}`), ...result.merged.map(path => `Combined offline edits: ${path}`)];
         this.lastChecked = new Date().toLocaleTimeString();
         this.setMessage(result.pending.length ? `${result.pending.length} items need attention` : result.conflicts.length ? 'Conflicts preserved' : this.dirty ? 'Checking new changes…' : 'Synced with Drive');
         if (result.conflicts.length) new Notice('Drive Sync preserved both edits in conflict copies.', 8000);
@@ -495,7 +502,7 @@ class ConnectionModal extends Modal {
     this.setTitle(`Drive Sync · ${this.app.vault.getName()}`);
     const status = this.contentEl.createEl('p', { attr: { role: 'status', 'aria-live': 'polite' } });
     const details = this.contentEl.createEl('pre'); details.style.whiteSpace = 'pre-wrap';
-    const render = () => { status.setText(this.plugin.syncMessage); details.setText([this.plugin.auth.state.message, this.plugin.lastChecked ? `Last completed check: ${this.plugin.lastChecked}` : '', ...this.plugin.details].filter(Boolean).join('\n')); };
+    const render = () => { status.setText(this.plugin.syncMessage); details.setText([this.plugin.auth.state.message, this.plugin.lastChecked ? `Last completed check: ${this.plugin.lastChecked}` : '', ...this.plugin.details, ...this.plugin.syncInfo].filter(Boolean).join('\n')); };
     render(); this.unsubscribe = this.plugin.subscribe(render);
     new Setting(this.contentEl).addButton(b => b.setButtonText('Sync now').setCta().onClick(() => void this.plugin.manualSync()))
       .addButton(b => b.setButtonText(this.plugin.settings.syncEnabled ? 'Pause' : 'Resume').onClick(() => void this.plugin.run(async () => {

@@ -139,3 +139,15 @@ See [FEASIBILITY.md](FEASIBILITY.md) for evidence and remaining limits, and [DEV
 ## Upgrading to 1.0.0
 
 Update Drive Sync through BRAT in every device/vault. Existing Google connections and selected folders remain intact; no re-pairing is needed. Pairing is only for setting up additional devices. The obsolete nearby notification setup is ignored. This release has no dependency on a Firestore project or hosted relay.
+
+## Upcoming 1.1.0: offline recovery and Markdown merging
+
+The development build recovers accepted replacement uploads whose replies were lost. Once the phone reconnects, it compares Drive against its persisted upload journal before deciding whether another device edited the note.
+
+For Markdown notes with a confirmed common version, separate edits to different lines combine automatically. Overlapping or ambiguous edits still produce ordinary conflict copies, with a reason in sync details. Automatic merging is limited to 256 KiB and 2,000 lines per input and result; larger notes and attachments retain conflict preservation. New and upgraded notes need a successful sync to establish their common version. Previously created conflict copies are not automatically combined or removed.
+
+Common versions and interrupted-merge inputs are ordinary local text snapshots under `.obsidian/plugins/drive-sync/merge-snapshots/` (using your vault's configured Obsidian settings directory). This plugin excludes them from Drive synchronization. They consume extra local disk space and are not encrypted separately from the vault. Only referenced common versions and unresolved journals are retained after successful cleanup. Do not copy plugin data or snapshots between devices: each device maintains its own recovery state.
+
+A missing or corrupt common snapshot falls back to preserving both versions. An interrupted merge with unavailable recovery inputs stops that note for review, without overwriting either side. Successful merging and upload recovery do not display an alert; details are available from the sync status panel. The 60-second foreground timer and immediate resume checks are unchanged.
+
+This build is not yet a published release. Real Mac/iPhone offline-edit validation must pass before 1.1.0 is published.

@@ -38,7 +38,7 @@ async function fixture(online = true) {
   p.settings = { syncEnabled: true, folderId: 'root-folder', syncState: { folderId: 'root-folder', baseline: {} },
     driveIndex: { format: 1, folderId: 'root-folder', cursor: 'first', folders: { '': 'root-folder' }, files: [] } };
   p.manifest = { id: 'drive-sync' };
-  p.app = { vault: { configDir: '.obsidian', adapter: { write: async () => {} } } };
+  p.app = { vault: { configDir: '.obsidian', adapter: { write: async () => {}, stat: async () => null } } };
   p.auth = { state: { status: 'connected' }, tokenForDrive: async () => 'synthetic-token', resumeNetwork: () => {}, stop: () => {} };
   p.localIndex = { clear: () => {} };
   p.localStore = () => ({ list: async () => [], read: async () => null });

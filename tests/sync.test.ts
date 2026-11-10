@@ -1,9 +1,9 @@
-import { equalContent, type Content } from '../src/content';
+import { fingerprint, equalContent, type Content } from '../src/content';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { recordRename } from '../src/state';
 import { SyncEngine, StaleWrite, emptySyncState, type LocalStore, type RemoteStore, type RemoteFile } from '../src/sync';
-function fixture() {
+function fixture(withSnapshots = false) {
   const files = new Map<string, { id: string; content: Content; version: number }>();
   const trashed = new Map<string, Content>();
   let next = 0; let failList = false; let race: (() => void) | undefined;
@@ -52,7 +52,13 @@ function fixture() {
         notes.set(path, content); return true;
       }
     };
-    const make = () => new SyncEngine(local, remote, state, async () => { saves++; });
+    const blobs = new Map<string, string>();
+    const snapshots = withSnapshots ? {
+      put: async (text: string) => { const hash = await fingerprint(text); blobs.set(hash, text); return hash; },
+      get: async (hash: string) => blobs.get(hash) ?? null,
+      collect: async (keep: ReadonlySet<string>) => { for (const hash of blobs.keys()) if (!keep.has(hash)) blobs.delete(hash); }
+    } : undefined;
+    const make = () => new SyncEngine(local, remote, state, async () => { saves++; }, false, snapshots);
     return { notes, state, engine: make(), restart: make, race: (fn: () => void) => { applyRace = fn; }, saves: () => saves };
   }
   return { files, trashed, remote, device, offline: (value: boolean) => { failList = value; }, race: (fn: () => void) => { race = fn; } };
@@ -267,4 +273,14 @@ test('a changed remote version overrides a warm local fingerprint and preserves 
   const result = await new SyncEngine(local, f.remote, a.state, async () => {}).run();
   assert.equal(a.notes.get('note.md'), 'remote edit');
   assert.equal(a.notes.get(result.conflicts[0]!), 'local edit');
+});
+
+test('two independently persisted devices converge after different offline Markdown edits', async () => {
+  const f = fixture(true), mac = f.device(), phone = f.device();
+  mac.notes.set('note.md', 'title\nunchanged\nend\n'); await mac.engine.run(); await phone.engine.run();
+  mac.notes.set('note.md', 'desktop\nunchanged\nend\n'); phone.notes.set('note.md', 'title\nunchanged\nphone\n');
+  await mac.engine.run(); const result = await phone.restart().run(); assert.equal(result.conflicts.length, 0);
+  await phone.restart().run(); await mac.restart().run();
+  assert.equal(mac.notes.get('note.md'), 'desktop\nunchanged\nphone\n'); assert.equal(mac.notes.get('note.md'), phone.notes.get('note.md'));
+  assert.equal(f.files.size, 1); assert.equal(phone.notes.size, 1); assert.equal(mac.notes.size, 1);
 });

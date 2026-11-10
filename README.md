@@ -10,6 +10,8 @@ The automated suite covers incremental sync, offline scheduling, conflict preser
 
 Start with the [full installation guide](INSTALLATION.md). It covers BRAT on desktop and iPhone, one-time Google project setup, today's per-device sign-in, troubleshooting, and the pairing/automatic-sync flow. Installing the GitHub app is unnecessary.
 
+The upcoming 1.1.0 development build adds interrupted-upload recovery and conservative automatic Markdown merging. It is awaiting real Mac/iPhone offline validation; 1.0.0 remains the published release.
+
 ## Project layout
 
 - `REQUIREMENTS.md`: requirements, architecture decisions, open questions, and acceptance criteria.

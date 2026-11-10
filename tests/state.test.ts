@@ -17,3 +17,18 @@ test('folder renames, rename chains, and deletion during a rename retain intent'
   s.pendingCreates['new.md'] = 'pending'; recordRename(s, 'new.md', 'renamed.md');
   assert.equal(s.renames?.['new.md'], 'renamed.md'); recordRename(s, 'renamed.md', 'new.md'); assert.equal(s.renames?.['new.md'], undefined);
 });
+
+test('optional snapshot and offline journal fields validate without changing format-1 state', () => {
+  const s = emptySyncState(), hash = 'a'.repeat(64);
+  s.baseline['note.md'] = { id: 'file', hash, snapshot: hash };
+  s.pendingWrites = { 'note.md': { id: 'file', baseHash: hash, hash, snapshot: hash } };
+  s.pendingMerges = { 'note.md': { id: 'file', baseHash: hash, localHash: hash, remoteHash: hash, mergedHash: hash, uploaded: false } };
+  assert.deepEqual(loadState(s, '').pendingMerges, s.pendingMerges);
+  for (const mutate of [
+    (v: any) => { v.baseline['note.md'].snapshot = '../note'; },
+    (v: any) => { v.pendingWrites['note.md'].snapshot = 'b'.repeat(64); },
+    (v: any) => { v.pendingMerges['note.md'].uploaded = 'true'; },
+    (v: any) => { v.pendingMerges['note.md'].mergedHash = '../note'; },
+    (v: any) => { v.pendingWrites = []; }
+  ]) { const invalid = structuredClone(s); mutate(invalid); assert.throws(() => loadState(invalid, '')); }
+});

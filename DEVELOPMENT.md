@@ -163,3 +163,25 @@ Drive and OAuth transports honor Retry-After, including a minimum 30-second cool
 Expired Drive cursors and missing indexes for established vaults require the manual Full reconciliation action. First setup builds its initial index; structural folder changes still refresh scoped folder metadata as part of normal delta processing. Full reconciliation reads only the selected vault tree, preserves conflicts, and retains deletion guards.
 
 Release validation: `npm run check` passes build, type checking, credential-pattern scanning, and 116 tests. Scheduler tests exercise the actual bundled plugin using synthetic Obsidian/Drive adapters: a full hour of 60-second checks; edit debounce resetting the deadline; offline suppression; background/resume and pause; in-flight edits and recovery; manual probing; Google cooldowns; and manual checkpoint recovery. Existing conflict, uncertain-write, attachment, deletion, and 2,000-file tests remain passing. These are automated results, not a new real-iPhone network/lifecycle test. Earlier real-device evidence above remains applicable to the unchanged file-transfer paths. Full Mac restart, controlled iPhone airplane-mode validation, and production OAuth review remain deferred.
+
+## 1.1.0 development — offline replacement recovery and three-way Markdown merge
+
+Replacement writes persist `{id, baseHash, hash, snapshot?}` in `pendingWrites` before the network operation. Recovery compares the actual remote bytes to the attempted hash. A match checkpoints that accepted remote version before reconciling later local edits; otherwise the original common baseline remains authoritative and a fresh ETag is required.
+
+Eligible Markdown baselines reference content-addressed, hash-verified snapshots in the plugin's `merge-snapshots` directory. `SnapshotStore` abstracts persistence from the engine. The Obsidian adapter stages and verifies writes before recording references. Cleanup first persists the current state, then retains every baseline and unresolved-journal reference; it removes only generated unreferenced blobs/temp files within that directory. Existing format-1 state is extended with optional validated fields, without guessing historical text from diverged notes.
+
+`node-diff3` 3.2.1 is pinned, bundled, and distributed with its MIT attribution. Inputs are arrays of complete lines with terminators retained; identical changes are suppressed. Only conflict-free results within the 256 KiB/2,000-line bounds are accepted. Adjacent ambiguous changes can conservatively produce a conflict copy. There is no whitespace normalization, timestamp winner, inline conflict-marker injection, or binary merge.
+
+A merge journal records all four input/output snapshot hashes and an upload-acknowledged flag before mutation. ETag-conditional upload comes first; its acknowledgment is persisted before guarded local application. If a reply is lost, matching remote output proves acceptance. Recovery rebases intervening local edits against the saved local input and merged output; overlapping late edits get a conflict copy. A further check reconciles any newer remote/local changes. State-write failure and restart are tested at each save boundary. Unverifiable journal inputs stop recovery for review. Journals follow confirmed renames and are retired with confirmed deletions.
+
+Automated validation: `npm run check` passes the build, type check, credential-pattern scan, and 152 tests. Added coverage includes the reproduced lost-reply/next-offline-edit case, independent-device convergence, merge upload failure, overlapping and identical edits, stale ETags, edits during guarded application, save failures before/after persistence, same-process retry, disk failure, corrupt/missing snapshots, old-state migration, rename recovery, Unicode/CRLF, size bounds, and actual temporary-filesystem snapshot persistence/cleanup. These are automated checks; no new real Mac/iPhone offline validation has been performed yet.
+
+Required device signoff before publishing 1.1.0:
+
+1. Install the local development build on Mac and iPhone, preserving each device's existing credentials and settings. Confirm a clean sync establishes common snapshots.
+2. Use a uniquely named disposable Markdown note with separated top/bottom sections. Take the phone offline, edit only on the phone, reconnect, and verify both devices converge with no conflict copy.
+3. Repeat with the phone changing the top section offline and the Mac changing the bottom. Reconnect and verify both edits in one note on both devices.
+4. Change the same line independently while the phone is offline. Verify both versions are preserved, and the status details explain the overlap.
+5. Repeat resume after force-closing/reopening the phone; verify no repeated conflict copies, missing edits, or stuck sync state. Remove only the disposable test note/copies through normal recoverable trash after validation.
+
+1.0.0 remains the published release. No public validation tag is published automatically: the installed BRAT version considers prereleases while resolving `latest`, so marking a test release as prerelease would not isolate automatic updates.
